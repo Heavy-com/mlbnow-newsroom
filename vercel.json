@@ -1,13 +1,8 @@
 {
   "version": 2,
   "outputDirectory": "public",
-  "rewrites": [
-    { "source": "/api/news",         "destination": "/api/news" },
-    { "source": "/api/nocap",        "destination": "/api/nocap" },
-    { "source": "/api/alerts",       "destination": "/api/alerts" },
-    { "source": "/api/transactions", "destination": "/api/transactions" }
-  ],
   "crons": [
     { "path": "/api/alerts", "schedule": "*/5 * * * *" }
   ]
 }
+
