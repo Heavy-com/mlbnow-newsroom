@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "outputDirectory": "public",
   "rewrites": [
     { "source": "/api/news",         "destination": "/api/news" },
     { "source": "/api/nocap",        "destination": "/api/nocap" },
