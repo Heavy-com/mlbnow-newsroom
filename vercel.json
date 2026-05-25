@@ -1,7 +1,14 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/api/news", "destination": "/api/news" },
-    { "source": "/api/nocap", "destination": "/api/nocap" }
+    { "source": "/api/news",   "destination": "/api/news" },
+    { "source": "/api/nocap",  "destination": "/api/nocap" },
+    { "source": "/api/alerts", "destination": "/api/alerts" }
+  ],
+  "crons": [
+    {
+      "path": "/api/alerts",
+      "schedule": "*/5 * * * *"
+    }
   ]
 }
