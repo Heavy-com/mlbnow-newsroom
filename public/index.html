@@ -171,11 +171,12 @@
   </aside>
 
   <main class="content">
-    <div class="stats-row">
+    <div class="stats-row" style="grid-template-columns:repeat(6,1fr)">
       <div class="stat-card"><div class="stat-label">Total Stories</div><div class="stat-value" id="stat-total">—</div><div class="stat-sub">this refresh</div></div>
       <div class="stat-card"><div class="stat-label">X Posts</div><div class="stat-value" id="stat-social" style="color:var(--x-color)">—</div><div class="stat-sub">from nocap.lv</div></div>
       <div class="stat-card"><div class="stat-label">Trades & Moves</div><div class="stat-value" id="stat-trades" style="color:var(--gold)">—</div><div class="stat-sub">roster news</div></div>
       <div class="stat-card"><div class="stat-label">Injuries</div><div class="stat-value" id="stat-injuries" style="color:var(--green-bright)">—</div><div class="stat-sub">IL & health</div></div>
+      <div class="stat-card"><div class="stat-label">Transactions</div><div class="stat-value" id="stat-transactions" style="color:#a78bfa">—</div><div class="stat-sub">today's moves</div></div>
       <div class="stat-card"><div class="stat-label">Last Updated</div><div class="stat-value" id="stat-updated" style="font-size:17px;padding-top:6px">—</div><div class="stat-sub">&nbsp;</div></div>
     </div>
 
@@ -183,6 +184,10 @@
     <div class="source-tabs">
       <button class="source-tab active" id="tab-all" onclick="setSourceTab('all',this)">All <span class="tab-count" id="tab-count-all">—</span></button>
       <button class="source-tab" id="tab-news" onclick="setSourceTab('news',this)">📰 News Articles <span class="tab-count" id="tab-count-news">—</span></button>
+      <button class="source-tab" id="tab-transactions" onclick="setSourceTab('transactions',this)">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Transactions <span class="tab-count" id="tab-count-transactions">—</span>
+      </button>
       <button class="source-tab" id="tab-social" onclick="setSourceTab('social',this)">
         <svg class="x-logo" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.63L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z"/></svg>
         X Posts <span class="tab-count" id="tab-count-social">—</span>
@@ -249,6 +254,7 @@ const NEWS_QUERIES = [
 
 let newsArticles = [];
 let socialPosts = [];
+let transactions = [];
 let activeCategory = 'all';
 let activeSourceTab = 'all';
 
@@ -264,6 +270,13 @@ const matchTeamsSocial = a => {
     return streamMatch || kwMatch;
   }).map(t=>t.id);
 };
+const matchTeamsTransaction = t => {
+  const teamName = n => (n||'').toLowerCase();
+  return TEAMS.filter(tm => {
+    const from = teamName(t.fromTeam); const to = teamName(t.toTeam);
+    return tm.keywords.some(k => from.includes(k) || to.includes(k));
+  }).map(tm=>tm.id);
+};
 const isTrade = a => TRADE_KW.some(k=>txt(a).includes(k));
 const isInjury = a => INJURY_KW.some(k=>txt(a).includes(k));
 const isBreaking = a => BREAKING_KW.some(k=>txt(a).includes(k)) || (a.matched_streams||[]).includes('Breaking MLB');
@@ -277,9 +290,10 @@ async function fetchAll() {
   btn.classList.add('spinning');
   document.getElementById('cardsGrid').innerHTML = '<div class="state-box"><div class="spinner"></div><span>Connecting to sources…</span></div>';
 
-  const [newsResults, nocapResult] = await Promise.allSettled([
+  const [newsResults, nocapResult, txResult] = await Promise.allSettled([
     Promise.allSettled(NEWS_QUERIES.map(q=>fetch(`/api/news?q=${encodeURIComponent(q)}&pageSize=25`).then(r=>r.json()))),
-    fetch('/api/nocap').then(r=>r.json())
+    fetch('/api/nocap').then(r=>r.json()),
+    fetch('/api/transactions').then(r=>r.json())
   ]);
 
   // Process news articles
@@ -313,6 +327,19 @@ async function fetchAll() {
     }
   }
 
+  // Process transactions
+  transactions = [];
+  if (txResult.status==='fulfilled' && txResult.value.transactions) {
+    for (const t of txResult.value.transactions) {
+      t._teams = matchTeamsTransaction(t);
+      t._sortDate = new Date(t.date);
+      t._trade = t._category === 'trade';
+      t._injury = t._category === 'injury';
+      t._breaking = false;
+      transactions.push(t);
+    }
+  }
+
   updateStats();
   updateTicker();
   updateTabCounts();
@@ -325,11 +352,13 @@ async function fetchAll() {
 function allItems() {
   if (activeSourceTab === 'news') return newsArticles;
   if (activeSourceTab === 'social') return socialPosts;
-  return [...newsArticles, ...socialPosts].sort((a,b)=>b._sortDate-a._sortDate);
+  if (activeSourceTab === 'transactions') return transactions;
+  return [...newsArticles, ...socialPosts, ...transactions].sort((a,b)=>b._sortDate-a._sortDate);
 }
 
 function updateStats() {
-  const all = [...newsArticles, ...socialPosts];
+  const all = [...newsArticles, ...socialPosts, ...transactions];
+  document.getElementById('stat-transactions').textContent = transactions.length;
   document.getElementById('stat-total').textContent = all.length;
   document.getElementById('stat-social').textContent = socialPosts.length;
   document.getElementById('stat-trades').textContent = all.filter(a=>a._trade).length;
@@ -341,7 +370,8 @@ function updateStats() {
 }
 
 function updateTabCounts() {
-  document.getElementById('tab-count-all').textContent = newsArticles.length + socialPosts.length;
+  document.getElementById('tab-count-all').textContent = newsArticles.length + socialPosts.length + transactions.length;
+  document.getElementById('tab-count-transactions').textContent = transactions.length;
   document.getElementById('tab-count-news').textContent = newsArticles.length;
   document.getElementById('tab-count-social').textContent = socialPosts.length;
 }
@@ -408,6 +438,7 @@ function renderCards() {
 
   document.getElementById('cardsGrid').innerHTML = items.map((a,i)=>{
     const delay = Math.min(i*20,400);
+    if (a._type==='transaction') return renderTransactionCard(a,delay);
     return a._type==='social' ? renderSocialCard(a,delay) : renderNewsCard(a,delay);
   }).join('');
 }
@@ -483,6 +514,33 @@ function renderSocialCard(p, delay) {
         <button class="btn-read" onclick="window.open('${p.source_url}','_blank')">View on X →</button>
         <button class="btn-assign" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
       </div>
+    </div>
+  </div>`;
+}
+
+function renderTransactionCard(t, delay) {
+  const typeColors = { trade:'type-trade', injury:'type-injury', roster:'type-transaction' };
+  const typeClass = typeColors[t._category] || 'type-transaction';
+  const typeEmoji = t._category==='trade'?'🔄':t._category==='injury'?'🏥':'📋';
+  const teamTags = TEAMS.filter(tm=>t._teams.includes(tm.id)).slice(0,2).map(tm=>`<span class="team-tag" style="border-left:2px solid ${tm.color}">${tm.label.split(' ').slice(-1)[0]}</span>`).join('');
+  const fromTo = t.fromTeam && t.toTeam
+    ? `<span>${t.fromTeam}</span><span class="tx-arrow">→</span><span>${t.toTeam}</span>`
+    : t.fromTeam ? `<span>${t.fromTeam}</span>` : t.toTeam ? `<span>${t.toTeam}</span>` : '';
+  const date = new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  return `<div class="card transaction" style="animation-delay:${delay}ms">
+    <div class="tx-body">
+      <div class="card-meta">
+        <span class="type-tag ${typeClass}">${typeEmoji} ${t.transactionType}</span>
+        ${teamTags}
+        <span class="card-time">${date}</span>
+      </div>
+      <div class="tx-player">${t.player}</div>
+      <div class="tx-desc">${t.description}</div>
+      ${fromTo ? `<div class="tx-teams">${fromTo}</div>` : ''}
+    </div>
+    <div class="card-footer">
+      <span class="card-author" style="color:#a78bfa;font-size:10px;font-family:'DM Mono',monospace">MLB OFFICIAL</span>
+      <button class="btn-assign" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
     </div>
   </div>`;
 }
