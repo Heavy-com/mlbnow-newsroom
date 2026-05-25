@@ -8,7 +8,6 @@
     { "source": "/api/transactions", "destination": "/api/transactions" }
   ],
   "crons": [
-    { "path": "/api/alerts",       "schedule": "*/5 * * * *" },
-    { "path": "/api/transactions", "schedule": "*/2 * * * *" }
+    { "path": "/api/alerts", "schedule": "*/5 * * * *" }
   ]
 }
