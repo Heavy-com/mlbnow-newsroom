@@ -226,7 +226,7 @@ module.exports = async (req, res) => {
   const errors = [];
 
   try {
-    const [articles, posts] = await Promise.all([fetchNewsArticles(), fetchSocialPosts()]);
+    const [articles, posts, txns] = await Promise.all([fetchNewsArticles(), fetchSocialPosts(), fetchTransactions()]);
 
     // Process news articles
     for (const article of articles) {
@@ -284,6 +284,32 @@ module.exports = async (req, res) => {
       }
     }
 
+    // Process transactions
+    for (const t of txns) {
+      const id = `txn-${t.id}`;
+      if (seen.has(id)) continue;
+
+      const teamName = n => (n||'').toLowerCase();
+      const matchedTeams = Object.entries(TEAM_CONFIG).filter(([tid, cfg]) => {
+        return cfg.keywords.some(k => teamName(t.fromTeam?.name).includes(k) || teamName(t.toTeam?.name).includes(k));
+      }).map(([tid]) => tid);
+
+      if (!matchedTeams.length) continue;
+      seen.add(id);
+
+      for (const teamId of matchedTeams) {
+        const webhook = TEAM_WEBHOOKS[teamId];
+        if (!webhook) continue;
+        const message = buildTransactionMessage(t, teamId);
+        try {
+          await postToSlack(webhook, message);
+          alerts.push({ type: 'transaction', team: teamId, player: t.player?.fullName, txType: t.transactionType });
+        } catch (e) {
+          errors.push({ team: teamId, error: e.message });
+        }
+      }
+    }
+
     res.status(200).json({
       success: true,
       alerts_sent: alerts.length,
@@ -295,3 +321,57 @@ module.exports = async (req, res) => {
     res.status(500).json({ success: false, error: e.message });
   }
 };
+
+// ── TRANSACTION ALERTS (appended) ────────────────────────────────────────────
+// This is called from the main module.exports handler — see fetchAndAlertTransactions below
+
+async function fetchTransactions() {
+  return new Promise((resolve, reject) => {
+    const d = new Date(); const today = d.toISOString().split('T')[0];
+    d.setDate(d.getDate()-1); const yesterday = d.toISOString().split('T')[0];
+    const path = `/api/v1/transactions?startDate=${yesterday}&endDate=${today}&sportId=1`;
+    const options = {
+      hostname: 'statsapi.mlb.com', path, method: 'GET',
+      headers: { 'User-Agent': 'HeavyOnMLB/1.0', 'Accept': 'application/json' }
+    };
+    const req = https.request(options, res => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data).transactions || []); }
+        catch(e) { resolve([]); }
+      });
+    });
+    req.on('error', () => resolve([]));
+    req.end();
+  });
+}
+
+function buildTransactionMessage(t, teamId) {
+  const team = TEAM_CONFIG[teamId];
+  const typeEmoji = t.transactionType?.toLowerCase().includes('il') ? '🏥' : '🔄';
+  const fromTo = t.fromTeam?.name && t.toTeam?.name
+    ? `${t.fromTeam.name} → ${t.toTeam.name}`
+    : t.fromTeam?.name || t.toTeam?.name || '';
+  return {
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `${typeEmoji} *TRANSACTION* — ${team.emoji} ${team.label}\n*${t.player?.fullName || 'Unknown'}* — ${t.transactionType}`
+        }
+      },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: t.description || fromTo || 'No description available' }
+      },
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `🏟️ MLB Official Transactions  ·  📅 ${t.effectiveDate || t.date}` }]
+      },
+      { type: 'divider' }
+    ],
+    unfurl_links: false
+  };
+}
