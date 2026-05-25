@@ -1,0 +1,11 @@
+{
+  "name": "heavy-on-mlb-newsroom",
+  "version": "1.0.0",
+  "description": "Heavy on MLB live newsroom dashboard",
+  "scripts": {
+    "start": "node api/news.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
