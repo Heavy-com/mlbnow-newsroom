@@ -326,7 +326,13 @@ module.exports = async (req, res) => {
       success: true,
       alerts_sent: alerts.length,
       alerts,
-      errors
+      errors,
+      debug: {
+        articles_fetched: articles.length,
+        transactions_fetched: txns.length,
+        posts_fetched: posts.length,
+        today: new Date().toISOString().split('T')[0]
+      }
     });
 
   } catch (e) {
