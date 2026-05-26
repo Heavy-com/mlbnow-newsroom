@@ -1,8 +1,1 @@
-{
-  "version": 2,
-  "outputDirectory": "public",
-  "crons": [
-    { "path": "/api/alerts", "schedule": "*/5 * * * *" }
-  ]
-}
-
+{"version":2,"outputDirectory":"public"}
