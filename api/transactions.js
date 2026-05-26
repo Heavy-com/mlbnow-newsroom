@@ -1,124 +1,48 @@
-// api/transactions.js — Vercel serverless function
-// Fetches real-time MLB transactions from the official MLB Stats API
-// No API key required — completely free and public
-// Cache: 2 minutes (transactions update frequently throughout the day)
-
 const https = require('https');
-
-const CACHE_DURATION_MS = 2 * 60 * 1000; // 2 minutes
-let cache = null;
-
-function today() {
-  return new Date().toISOString().split('T')[0];
-}
-
-function yesterday() {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().split('T')[0];
-}
-
-function fetchTransactions() {
-  return new Promise((resolve, reject) => {
-    const start = yesterday();
-    const end = today();
-    const path = `/api/v1/transactions?startDate=${start}&endDate=${end}&sportId=1`;
-
-    const options = {
-      hostname: 'statsapi.mlb.com',
-      path,
-      method: 'GET',
-      headers: {
-        'User-Agent': 'HeavyOnMLB/1.0',
-        'Accept': 'application/json'
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-        catch (e) { reject(new Error('Failed to parse MLB transactions response')); }
-      });
-    });
-
-    req.on('error', reject);
-    req.end();
-  });
-}
-
-// Normalize transaction into a clean card-ready object
-function normalize(t) {
-  const player = t.player?.fullName || 'Unknown Player';
-  const fromTeam = t.fromTeam?.name || null;
-  const toTeam = t.toTeam?.name || null;
-  const type = t.transactionType || 'TRANSACTION';
-  const date = t.effectiveDate || t.date || today();
-  const description = t.description || buildDescription(type, player, fromTeam, toTeam);
-
-  // Map transaction type to a category
-  let category = 'roster';
-  const typeLower = type.toLowerCase();
-  if (['trade','optional assignment','recall','outrighted','selected','designated'].some(k => typeLower.includes(k))) category = 'trade';
-  if (['il','injured','disability'].some(k => typeLower.includes(k))) category = 'injury';
-  if (['signed','contract','extension','free agent'].some(k => typeLower.includes(k))) category = 'trade';
-  if (['release','released','dfa','designated for assignment'].some(k => typeLower.includes(k))) category = 'trade';
-
-  return {
-    _type: 'transaction',
-    _category: category,
-    id: `txn-${t.id || Math.random()}`,
-    player,
-    fromTeam,
-    toTeam,
-    transactionType: type,
-    description,
-    date,
-    fromTeamId: t.fromTeam?.id || null,
-    toTeamId: t.toTeam?.id || null,
-  };
-}
-
-function buildDescription(type, player, fromTeam, toTeam) {
-  if (fromTeam && toTeam) return `${player} traded from ${fromTeam} to ${toTeam}`;
-  if (fromTeam) return `${fromTeam} ${type.toLowerCase()} ${player}`;
-  if (toTeam) return `${toTeam} ${type.toLowerCase()} ${player}`;
-  return `${player} — ${type}`;
-}
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+  const d = new Date();
+  const today = d.toISOString().split('T')[0];
+  d.setDate(d.getDate() - 1);
+  const yesterday = d.toISOString().split('T')[0];
 
-  const now = Date.now();
+  const data = await new Promise((resolve) => {
+    const req2 = https.request({
+      hostname: 'statsapi.mlb.com',
+      path: `/api/v1/transactions?startDate=${yesterday}&endDate=${today}&sportId=1`,
+      method: 'GET',
+      headers: { 'Accept': 'application/json', 'User-Agent': 'HeavyOnMLB/1.0' }
+    }, (r) => {
+      let body = '';
+      r.on('data', c => body += c);
+      r.on('end', () => { try { resolve(JSON.parse(body)); } catch(e) { resolve({}); } });
+    });
+    req2.on('error', () => resolve({}));
+    req2.end();
+  });
 
-  if (cache && (now - cache.timestamp) < CACHE_DURATION_MS) {
-    res.setHeader('X-Cache', 'HIT');
-    return res.status(200).json(cache.data);
-  }
+  const posRegex = /\b(?:LHP|RHP|SP|RP|1B|2B|3B|SS|OF|CF|RF|LF|DH|C)\s+([A-Z\u00C0-\u024F][a-z\u00C0-\u024F]+(?:\s+[A-Z\u00C0-\u024F][a-z\u00C0-\u024F]+)+)/;
 
-  try {
-    const { status, body } = await fetchTransactions();
+  const transactions = (data.transactions || []).map(t => {
+    const desc = t.description || '';
+    const match = desc.match(posRegex);
+    const player = (t.player && t.player.fullName) ? t.player.fullName : (match ? match[1] : (t.fromTeam ? t.fromTeam.name : (t.toTeam ? t.toTeam.name : 'MLB')));
+    const type = (t.transactionType || '').toLowerCase();
+    const cat = ['il','injur','disability'].some(k=>type.includes(k)) ? 'injury' : 'trade';
+    return {
+      _type: 'transaction',
+      _category: cat,
+      id: `txn-${t.id}`,
+      player,
+      fromTeam: t.fromTeam ? t.fromTeam.name : null,
+      toTeam: t.toTeam ? t.toTeam.name : null,
+      transactionType: t.transactionType || 'Transaction',
+      description: desc,
+      date: t.effectiveDate || t.date || today,
+    };
+  }).sort((a,b) => new Date(b.date) - new Date(a.date));
 
-    if (status !== 200) {
-      return res.status(status).json({ error: 'MLB API error', status });
-    }
-
-    const transactions = (body.transactions || [])
-      .map(normalize)
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
-
-    const response = { transactions, count: transactions.length, fetchedAt: new Date().toISOString() };
-
-    cache = { timestamp: now, data: response };
-    res.setHeader('X-Cache', 'MISS');
-    res.status(200).json(response);
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  res.status(200).json({ transactions, count: transactions.length, fetchedAt: new Date().toISOString() });
 };

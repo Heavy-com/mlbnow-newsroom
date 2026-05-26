@@ -40,13 +40,20 @@ function normalizeTransaction(t) {
     _type: 'transaction',
     _category: category,
     id: `txn-${t.id || Math.random()}`,
-    player: t.player?.fullName || 'Unknown Player',
+    player: extractPlayerFromDesc(t.description) || t.player?.fullName || t.person?.fullName || 'Unknown Player',
     fromTeam: t.fromTeam?.name || null,
     toTeam: t.toTeam?.name || null,
     transactionType: t.transactionType || 'Transaction',
     description: t.description || `${t.player?.fullName} — ${t.transactionType}`,
     date: t.effectiveDate || t.date || today(),
   };
+}
+
+function extractPlayerFromDesc(desc) {
+  if (!desc) return null;
+  // Match position abbreviation followed by player name (handles accented chars)
+  const match = desc.match(/\b(?:LHP|RHP|SP|RP|1B|2B|3B|SS|OF|CF|RF|LF|DH|C)\s+([A-Z\u00C0-\u024F][a-z\u00C0-\u024F]+(?:\s+[A-Z\u00C0-\u024F][a-z\u00C0-\u024F]+)+)/);
+  return match ? match[1] : null;
 }
 
 module.exports = async (req, res) => {
@@ -57,15 +64,19 @@ module.exports = async (req, res) => {
 
   const url = require('url').parse(req.url, true);
   const isTransactions = url.pathname === '/api/transactions';
+  if (url.pathname === '/api/version') return res.status(200).json({ version: 'v4-player-fix', time: new Date().toISOString() });
   const now = Date.now();
 
   // ── TRANSACTIONS ────────────────────────────────────────────────────────────
   if (isTransactions) {
     const key = 'transactions';
-    if (cache[key] && (now - cache[key].timestamp) < TX_CACHE_MS) {
+    // Skip cache if bust param provided
+    const bustCache = url.query.bust;
+    if (!bustCache && cache[key] && (now - cache[key].timestamp) < TX_CACHE_MS) {
       res.setHeader('X-Cache', 'HIT');
       return res.status(200).json(cache[key].data);
     }
+    if (bustCache) delete cache[key];
     try {
       const path = `/api/v1/transactions?startDate=${yesterday()}&endDate=${today()}&sportId=1`;
       const { status, body } = await fetchJSON('statsapi.mlb.com', path);
