@@ -347,6 +347,8 @@ async function fetchAll() {
   renderCards();
   btn.classList.remove('spinning');
   document.getElementById('stat-updated').textContent = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  // Fire alerts in background on every refresh
+  fetch('/api/alerts').catch(()=>{});
 }
 
 function allItems() {
@@ -547,7 +549,10 @@ function renderTransactionCard(t, delay) {
 
 function updateClock(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 setInterval(updateClock,1000); updateClock();
-window.addEventListener('load',fetchAll);
+window.addEventListener('load', () => {
+  fetchAll();
+  setInterval(fetchAll, 5 * 60 * 1000);
+});
 </script>
 </body>
 </html>
