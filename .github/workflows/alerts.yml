@@ -1,0 +1,18 @@
+name: MLB Slack Alerts
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # every 5 minutes
+  workflow_dispatch:        # allows manual trigger from GitHub Actions tab
+
+jobs:
+  send-alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger alerts endpoint
+        run: |
+          curl -s -o response.json -w "%{http_code}" \
+            https://mlbnow-newsroom.vercel.app/api/alerts
+          cat response.json
+          echo ""
+          echo "Alerts check complete"
