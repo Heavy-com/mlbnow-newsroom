@@ -64,6 +64,7 @@ function typeLabel(types) {
   if (types.includes('breaking')) return { emoji: '🚨', label: 'BREAKING' };
   if (types.includes('trade'))    return { emoji: '🔄', label: 'TRADE' };
   if (types.includes('injury'))   return { emoji: '🏥', label: 'INJURY' };
+  if (types.includes('transaction')) return { emoji: '🔄', label: 'TRANSACTION' };
   return { emoji: '📰', label: 'NEWS' };
 }
 
@@ -234,10 +235,10 @@ module.exports = async (req, res) => {
       if (seen.has(id)) continue;
 
       const types = classify(article);
-      if (!types.length) continue; // only alert on breaking/trade/injury
-
       const teams = matchTeams(article);
       if (!teams.length) continue;
+      // Alert on any team story; classify gives it a label, fallback to 'news'
+      if (!types.length) types.push('news');
 
       seen.add(id);
 
