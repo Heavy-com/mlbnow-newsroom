@@ -104,44 +104,12 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // Try top-headlines first (real-time on free tier), merge with everything results
-    const headlinesPath = `/v2/top-headlines?q=${encodeURIComponent(q)}&language=en&pageSize=${pageSize}&apiKey=${API_KEY}`;
-    const everythingPath = `/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&pageSize=${pageSize}&apiKey=${API_KEY}&from=${new Date(Date.now() - 24*60*60*1000).toISOString()}`;
-
-    const [hlResult, evResult] = await Promise.allSettled([
-      fetchJSON('newsapi.org', headlinesPath),
-      fetchJSON('newsapi.org', everythingPath)
-    ]);
-
-    const seen = new Set();
-    const articles = [];
-
-    // Top-headlines first (freshest)
-    if (hlResult.status === 'fulfilled' && hlResult.value.body?.articles) {
-      for (const a of hlResult.value.body.articles) {
-        if (a.url && !seen.has(a.url) && a.title !== '[Removed]') {
-          seen.add(a.url);
-          articles.push(a);
-        }
-      }
-    }
-    // Everything as supplement
-    if (evResult.status === 'fulfilled' && evResult.value.body?.articles) {
-      for (const a of evResult.value.body.articles) {
-        if (a.url && !seen.has(a.url) && a.title !== '[Removed]') {
-          seen.add(a.url);
-          articles.push(a);
-        }
-      }
-    }
-
-    // Sort merged results by date
-    articles.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-
-    const body = { status: 'ok', totalResults: articles.length, articles };
-    if (articles.length) cache[cacheKey] = { timestamp: now, data: body };
+    const from = new Date(Date.now() - 24*60*60*1000).toISOString();
+    const path = `/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&pageSize=${pageSize}&from=${from}&apiKey=${API_KEY}`;
+    const { status, body } = await fetchJSON('newsapi.org', path);
+    if (status === 200 && body.status === 'ok') cache[cacheKey] = { timestamp: now, data: body };
     res.setHeader('X-Cache', 'MISS');
-    return res.status(200).json(body);
+    return res.status(status).json(body);
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
