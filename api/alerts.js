@@ -229,15 +229,21 @@ module.exports = async (req, res) => {
   try {
     const [articles, posts, txns] = await Promise.all([fetchNewsArticles(), fetchSocialPosts(), fetchTransactions()]);
 
+    // Only alert on stories published in the last 30 minutes
+    const FRESHNESS_MS = 30 * 60 * 1000;
+    const now = Date.now();
+
     // Process news articles
     for (const article of articles) {
       const id = article.url;
       if (seen.has(id)) continue;
 
+      const age = now - new Date(article.publishedAt).getTime();
+      if (isNaN(age) || age > FRESHNESS_MS) continue;
+
       const types = classify(article);
       const teams = matchTeams(article);
       if (!teams.length) continue;
-      // Alert on any team story; classify gives it a label, fallback to 'news'
       if (!types.length) types.push('news');
 
       seen.add(id);
@@ -286,9 +292,14 @@ module.exports = async (req, res) => {
     }
 
     // Process transactions
+    const todayStr = new Date().toISOString().split('T')[0];
     for (const t of txns) {
       const id = `txn-${t.id}`;
       if (seen.has(id)) continue;
+
+      // Only alert on today's transactions
+      const txDate = (t.effectiveDate || t.date || '');
+      if (!txDate.startsWith(todayStr)) continue;
 
       const teamName = n => (n||'').toLowerCase();
       const matchedTeams = Object.entries(TEAM_CONFIG).filter(([tid, cfg]) => {
