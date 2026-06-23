@@ -1,0 +1,70 @@
+name: Refresh Nocap Session
+on:
+  schedule:
+    - cron: '0 6 * * *'  # every day at 6am UTC
+  workflow_dispatch:      # allow manual trigger
+
+jobs:
+  refresh-session:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to nocap and get session cookie
+        id: login
+        run: |
+          # Login and capture the session cookie
+          RESPONSE=$(curl -s -c cookies.txt -w "\n%{http_code}" \
+            -X POST "https://signal.nocap.lv/api/v1/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\": \"${{ secrets.NOCAP_USERNAME }}\", \"password\": \"${{ secrets.NOCAP_PASSWORD }}\"}")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          echo "Login HTTP status: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Login failed with status $HTTP_CODE"
+            exit 1
+          fi
+          
+          # Extract session cookie value
+          SESSION=$(grep 'signalizacija_session' cookies.txt | awk '{print $NF}')
+          
+          if [ -z "$SESSION" ]; then
+            echo "No session cookie found in response"
+            cat cookies.txt
+            exit 1
+          fi
+          
+          echo "Session cookie obtained successfully"
+          echo "session=$SESSION" >> $GITHUB_OUTPUT
+
+      - name: Update Vercel environment variable
+        run: |
+          # Update NOCAP_SESSION in Vercel
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X PATCH "https://api.vercel.com/v9/projects/${{ secrets.VERCEL_PROJECT_ID }}/env" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "[{\"key\": \"NOCAP_SESSION\", \"value\": \"${{ steps.login.outputs.session }}\", \"type\": \"encrypted\", \"target\": [\"production\", \"preview\"]}]")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          echo "Vercel update HTTP status: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+            echo "Failed to update Vercel env var"
+            echo "$RESPONSE"
+            exit 1
+          fi
+          
+          echo "NOCAP_SESSION updated in Vercel successfully"
+
+      - name: Redeploy to apply new env var
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "https://api.vercel.com/v13/deployments" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\": \"heavy-newsroom\", \"projectId\": \"${{ secrets.VERCEL_PROJECT_ID }}\", \"target\": \"production\"}")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          echo "Redeploy HTTP status: $HTTP_CODE"
+          echo "Nocap session refresh complete"
