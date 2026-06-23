@@ -1,23 +1,23 @@
-// api/nba-alerts.js — Vercel serverless function
+// api/nhl-alerts.js — Vercel serverless function
 const https = require('https');
 
 const NEWS_API_KEY = process.env.NEWS_API_KEY || 'eba3bb2993124fb0b3c1117f7535afc2';
 const GNEWS_KEY = process.env.GNEWS_API_KEY || '615675b7f4505dd2b4567dfa0b0c86f6';
-const SLACK_WEBHOOK = process.env.SLACK_NBA;
+const SLACK_WEBHOOK = process.env.SLACK_NHL;
 
 const FRESHNESS_MS = 10 * 60 * 1000;
 let lastArticleIds = new Set();
 
 const QUERIES = [
-  'NBA trade signing free agent roster move',
-  'NBA injury player out',
-  'Lakers Celtics Warriors Knicks Bulls Heat NBA',
-  'Bucks Nuggets Suns Mavericks Clippers Nets NBA'
+  'NHL trade signing free agent roster move',
+  'NHL injury player out',
+  'Rangers Bruins Maple Leafs Canadiens Penguins Capitals NHL',
+  'Oilers Avalanche Lightning Panthers Kings Sharks NHL'
 ];
 
 const BREAKING_KW = ['breaking','exclusive','just in','confirmed','fired','suspended','announces','cut','released'];
 const TRADE_KW = ['trade','traded','signed','free agent','contract','extension','released','cut','waiver','claimed'];
-const INJURY_KW = ['injury','injured','injured reserve','surgery','torn','strain','sprain','concussion','day-to-day','out indefinitely'];
+const INJURY_KW = ['injury','injured','ltir','injured reserve','surgery','torn','strain','sprain','concussion','day-to-day','out indefinitely'];
 
 function fetchJSON(hostname, path) {
   return new Promise((resolve, reject) => {
@@ -57,7 +57,7 @@ function classify(article) {
   if (BREAKING_KW.some(k=>text.includes(k))) return { emoji:'🚨', label:'BREAKING' };
   if (TRADE_KW.some(k=>text.includes(k))) return { emoji:'🔄', label:'TRADE/MOVE' };
   if (INJURY_KW.some(k=>text.includes(k))) return { emoji:'🏥', label:'INJURY' };
-  return { emoji:'🏀', label:'NBA NEWS' };
+  return { emoji:'🏒', label:'NHL NEWS' };
 }
 
 function buildMessage(article) {
@@ -89,7 +89,7 @@ async function fetchArticles(q) {
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
-  if (!SLACK_WEBHOOK) return res.status(500).json({ error: 'SLACK_NBA environment variable not set' });
+  if (!SLACK_WEBHOOK) return res.status(500).json({ error: 'SLACK_NHL environment variable not set' });
 
   const alerts = [], errors = [];
   const now = Date.now();
