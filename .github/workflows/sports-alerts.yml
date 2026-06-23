@@ -1,27 +1,19 @@
 name: Sports Slack Alerts
 on:
   schedule:
-    - cron: '*/5 * * * *'  # every 5 minutes
+    - cron: '*/30 * * * *'  # every 30 minutes — shares /api/news cache, zero extra NewsAPI calls
   workflow_dispatch:
 jobs:
   send-alerts:
     runs-on: ubuntu-latest
     steps:
       - name: MLB Alerts
-        run: |
-          curl -s https://heavy-newsroom.vercel.app/api/alerts
-          echo ""
+        run: curl -s https://heavy-newsroom.vercel.app/api/alerts && echo ""
       - name: NFL Alerts
-        run: |
-          curl -s https://heavy-newsroom.vercel.app/api/nfl-alerts
-          echo ""
+        run: curl -s https://heavy-newsroom.vercel.app/api/nfl-alerts && echo ""
       - name: NBA Alerts
-        run: |
-          curl -s https://heavy-newsroom.vercel.app/api/nba-alerts
-          echo ""
+        run: curl -s https://heavy-newsroom.vercel.app/api/nba-alerts && echo ""
       - name: NHL Alerts
-        run: |
-          curl -s https://heavy-newsroom.vercel.app/api/nhl-alerts
-          echo ""
+        run: curl -s https://heavy-newsroom.vercel.app/api/nhl-alerts && echo ""
       - name: Done
         run: echo "All sports alerts checked"
