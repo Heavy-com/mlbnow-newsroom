@@ -1,14 +1,13 @@
 // api/nfl-alerts.js — Vercel serverless function
-// Polls NewsAPI for NFL stories and posts to Slack
-// Called every 5 minutes via GitHub Actions
+// Reads from /api/news cache instead of calling NewsAPI directly
+// Zero additional NewsAPI calls when cache is warm
 
 const https = require('https');
 
-const NEWS_API_KEY = process.env.NEWS_API_KEY || 'eba3bb2993124fb0b3c1117f7535afc2';
-const GNEWS_KEY = process.env.GNEWS_API_KEY || '615675b7f4505dd2b4567dfa0b0c86f6';
 const SLACK_WEBHOOK = process.env.SLACK_NFL;
+const BASE_URL = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://heavy-newsroom.vercel.app';
 
-const FRESHNESS_MS = 10 * 60 * 1000;
+const FRESHNESS_MS = 30 * 60 * 1000; // 30 min to match workflow interval
 let lastArticleIds = new Set();
 
 const QUERIES = [
@@ -22,20 +21,22 @@ const BREAKING_KW = ['breaking','exclusive','just in','confirmed','fired','suspe
 const TRADE_KW = ['trade','traded','signed','free agent','contract','extension','released','cut','waiver','claimed'];
 const INJURY_KW = ['injury','injured','ir ','injured reserve','surgery','torn','strain','sprain','concussion','pup','nfi'];
 
-function fetchJSON(hostname, path) {
+function fetchFromCache(q) {
   return new Promise((resolve, reject) => {
+    const url = new URL(`${BASE_URL}/api/news?q=${encodeURIComponent(q)}&pageSize=20`);
     const req = https.request(
-      { hostname, path, method: 'GET', headers: { 'Accept': 'application/json', 'User-Agent': 'HeavyOnSports/1.0' } },
+      { hostname: url.hostname, path: url.pathname + url.search, method: 'GET',
+        headers: { 'Accept': 'application/json', 'User-Agent': 'HeavyOnSports/1.0' } },
       res => {
         let data = '';
         res.on('data', c => data += c);
         res.on('end', () => {
-          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-          catch (e) { reject(new Error('JSON parse error')); }
+          try { resolve(JSON.parse(data).articles || []); }
+          catch (e) { resolve([]); }
         });
       }
     );
-    req.on('error', reject);
+    req.on('error', () => resolve([]));
     req.end();
   });
 }
@@ -78,17 +79,6 @@ function buildMessage(article) {
   };
 }
 
-async function fetchArticles(q) {
-  try {
-    const { status, body } = await fetchJSON('newsapi.org', `/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${NEWS_API_KEY}`);
-    if (status === 429 || body.code === 'rateLimited') {
-      const { status: gs, body: gb } = await fetchJSON('gnews.io', `/v4/search?q=${encodeURIComponent(q)}&lang=en&max=10&token=${GNEWS_KEY}`);
-      if (gs === 200 && gb.articles) return gb.articles.map(a=>({title:a.title,description:a.description,url:a.url,publishedAt:a.publishedAt,source:{name:a.source?.name}}));
-    }
-    return body.articles || [];
-  } catch(e) { return []; }
-}
-
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
@@ -98,7 +88,7 @@ module.exports = async (req, res) => {
   const now = Date.now();
 
   try {
-    const results = await Promise.all(QUERIES.map(fetchArticles));
+    const results = await Promise.all(QUERIES.map(fetchFromCache));
     const seen = new Set();
 
     for (const articles of results) {
