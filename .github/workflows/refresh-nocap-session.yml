@@ -67,7 +67,7 @@ jobs:
             -X PATCH "https://api.vercel.com/v9/projects/${{ secrets.VERCEL_PROJECT_ID }}/env/${{ steps.getenv.outputs.env_id }}" \
             -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d "{\"value\": \"${{ steps.login.outputs.session }}\", \"type\": \"encrypted\", \"target\": [\"production\", \"preview\"]}")
+            -d "{\"value\": \"${{ steps.login.outputs.session }}\", \"target\": [\"production\", \"preview\"]}")
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           echo "Vercel update HTTP status: $HTTP_CODE"
