@@ -1,44 +1,57 @@
 // api/nfl-alerts.js — Vercel serverless function
-// Reads from /api/news cache instead of calling NewsAPI directly
-// Zero additional NewsAPI calls when cache is warm
-
 const https = require('https');
 
+const NEWS_API_KEY = process.env.NEWS_API_KEY || 'eba3bb2993124fb0b3c1117f7535afc2';
+const GNEWS_KEY = process.env.GNEWS_API_KEY || '615675b7f4505dd2b4567dfa0b0c86f6';
 const SLACK_WEBHOOK = process.env.SLACK_NFL;
 const BASE_URL = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://heavy-newsroom.vercel.app';
 
-const FRESHNESS_MS = 30 * 60 * 1000; // 30 min to match workflow interval
+const FRESHNESS_MS = 30 * 60 * 1000;
 let lastArticleIds = new Set();
 
-const QUERIES = [
-  'NFL trade signing free agent roster move',
-  'NFL injury quarterback receiver',
-  'Cowboys Patriots Eagles Chiefs Bears Giants NFL',
-  'Rams Steelers Ravens 49ers Packers Seahawks NFL'
-];
+const QUERIES = ['NFL trade signing free agent roster move', 'NFL injury quarterback receiver', 'Cowboys Patriots Eagles Chiefs Bears Giants NFL', 'Rams Steelers Ravens 49ers Packers Seahawks NFL'];
 
 const BREAKING_KW = ['breaking','exclusive','just in','confirmed','fired','suspended','announces','cut','released'];
 const TRADE_KW = ['trade','traded','signed','free agent','contract','extension','released','cut','waiver','claimed'];
-const INJURY_KW = ['injury','injured','ir ','injured reserve','surgery','torn','strain','sprain','concussion','pup','nfi'];
+const INJURY_KW = ['injury', 'injured', 'ir ', 'injured reserve', 'surgery', 'torn', 'strain', 'sprain', 'concussion', 'pup', 'nfi'];
 
-function fetchFromCache(q) {
+function request(hostname, path, headers={}) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`${BASE_URL}/api/news?q=${encodeURIComponent(q)}&pageSize=20`);
     const req = https.request(
-      { hostname: url.hostname, path: url.pathname + url.search, method: 'GET',
-        headers: { 'Accept': 'application/json', 'User-Agent': 'HeavyOnSports/1.0' } },
+      { hostname, path, method: 'GET', headers: { 'Accept': 'application/json', 'User-Agent': 'HeavyOnSports/1.0', ...headers } },
       res => {
         let data = '';
         res.on('data', c => data += c);
         res.on('end', () => {
-          try { resolve(JSON.parse(data).articles || []); }
-          catch (e) { resolve([]); }
+          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+          catch (e) { resolve({ status: res.statusCode, body: {} }); }
         });
       }
     );
-    req.on('error', () => resolve([]));
+    req.on('error', reject);
     req.end();
   });
+}
+
+async function fetchArticles(q) {
+  // Try cache first
+  try {
+    const url = new URL(`${BASE_URL}/api/news?q=${encodeURIComponent(q)}&pageSize=20`);
+    const cached = await request(url.hostname, url.pathname + url.search);
+    if (cached.body.articles?.length) return cached.body.articles;
+  } catch(e) {}
+
+  // Fall back to NewsAPI
+  try {
+    const { status, body } = await request('newsapi.org', `/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${NEWS_API_KEY}`);
+    if (status === 200 && body.articles?.length) return body.articles;
+    // Fall back to GNews if rate limited
+    if (status === 429 || body.code === 'rateLimited') {
+      const { status: gs, body: gb } = await request('gnews.io', `/v4/search?q=${encodeURIComponent(q)}&lang=en&max=10&token=${GNEWS_KEY}`);
+      if (gs === 200 && gb.articles) return gb.articles.map(a => ({title:a.title,description:a.description,url:a.url,publishedAt:a.publishedAt,source:{name:a.source?.name}}));
+    }
+  } catch(e) {}
+  return [];
 }
 
 function postToSlack(webhook, payload) {
@@ -88,7 +101,7 @@ module.exports = async (req, res) => {
   const now = Date.now();
 
   try {
-    const results = await Promise.all(QUERIES.map(fetchFromCache));
+    const results = await Promise.all(QUERIES.map(fetchArticles));
     const seen = new Set();
 
     for (const articles of results) {
@@ -96,11 +109,9 @@ module.exports = async (req, res) => {
         const id = article.url;
         if (seen.has(id) || lastArticleIds.has(id)) continue;
         seen.add(id);
-
         const age = now - new Date(article.publishedAt).getTime();
         if (isNaN(age) || age > FRESHNESS_MS) continue;
         if (!article.title || article.title === '[Removed]') continue;
-
         lastArticleIds.add(id);
         try {
           await postToSlack(SLACK_WEBHOOK, buildMessage(article));
