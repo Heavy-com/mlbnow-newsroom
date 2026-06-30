@@ -259,7 +259,7 @@ module.exports = async (req, res) => {
 
     res.status(200).json({
       success: true, alerts_sent: alerts.length, alerts, errors,
-      debug: { articles_fetched: articles.length, transactions_fetched: txns.length, posts_fetched: posts.length, today: new Date().toISOString().split('T')[0] }
+      debug: { articles_fetched: articles.length, transactions_fetched: txns.length, posts_fetched: posts.length, today: new Date().toISOString().split('T')[0], webhook_preview: GCHAT_WEBHOOK ? GCHAT_WEBHOOK.slice(0,60) : null }
     });
   } catch(e) {
     res.status(500).json({ success:false, error:e.message });
