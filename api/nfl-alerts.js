@@ -1,12 +1,12 @@
 // api/nfl-alerts.js — Vercel serverless function
-// GNews + nocap social posts for NFL alerts
+// GNews + nocap social posts for NFL alerts, posted to Google Chat
 const https = require('https');
 
 const GNEWS_KEY = process.env.GNEWS_API_KEY || '615675b7f4505dd2b4567dfa0b0c86f6';
-const SLACK_WEBHOOK = process.env.SLACK_NFL;
+const GCHAT_WEBHOOK = process.env.GCHAT_NFL;
 const NOCAP_SESSION = process.env.NOCAP_SESSION || '';
 
-const FRESHNESS_MS = 6 * 60 * 60 * 1000; // 6 hours
+const FRESHNESS_MS = 6 * 60 * 60 * 1000;
 let lastArticleIds = new Set();
 let lastPostIds = new Set();
 
@@ -19,7 +19,6 @@ const QUERIES = [
 const BREAKING_KW = ['breaking','exclusive','just in','confirmed','fired','suspended','announces','cut','released'];
 const TRADE_KW = ['trade','traded','signed','free agent','contract','extension','released','cut','waiver','claimed'];
 const INJURY_KW = ["injury", "injured", "ir ", "injured reserve", "surgery", "torn", "strain", "sprain", "concussion", "pup", "nfi"];
-
 const TEAM_KEYWORDS = {
   "bills": [
     "buffalo bills",
@@ -201,12 +200,12 @@ async function fetchNocap() {
   } catch(e) { return []; }
 }
 
-function postToSlack(webhook, payload) {
+function postToGoogleChat(webhookUrl, text) {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify(payload);
-    const url = new URL(webhook);
+    const body = JSON.stringify({ text });
+    const url = new URL(webhookUrl);
     const req = https.request(
-      { hostname: url.hostname, path: url.pathname, method: 'POST',
+      { hostname: url.hostname, path: url.pathname + url.search, method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
       res => { let d=''; res.on('data',c=>d+=c); res.on('end',()=>resolve({status:res.statusCode,body:d})); }
     );
@@ -224,22 +223,15 @@ function classifyArticle(article) {
   return { emoji:'🏈', label:'NFL NEWS' };
 }
 
-function buildNewsMessage(article) {
+function buildNewsText(article) {
   const { emoji, label } = classifyArticle(article);
   const source = article.source?.name || 'Unknown';
   const time = new Date(article.publishedAt).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZoneName:'short'});
-  return {
-    blocks: [
-      { type:'section', text:{ type:'mrkdwn', text:`${emoji} *${label}*\n*<${article.url}|${article.title}>*` } },
-      article.description ? { type:'section', text:{ type:'mrkdwn', text:article.description.slice(0,280) } } : null,
-      { type:'context', elements:[{ type:'mrkdwn', text:`📰 ${source}  ·  🕐 ${time}` }] },
-      { type:'divider' }
-    ].filter(Boolean),
-    unfurl_links: false
-  };
+  const desc = article.description ? `\n${article.description.slice(0,280)}` : '';
+  return `${emoji} *${label}*\n*<${article.url}|${article.title}>*${desc}\n📰 ${source}  ·  🕐 ${time}`;
 }
 
-function buildSocialMessage(post) {
+function buildSocialText(post) {
   const author = post.author?.display_name || post.author?.username || 'Unknown';
   const handle = post.author?.username ? `@${post.author.username}` : '';
   const followers = post.author?.followers_count ? `${(post.author.followers_count/1000).toFixed(0)}K followers` : '';
@@ -247,23 +239,14 @@ function buildSocialMessage(post) {
   const text = (post.text_preview||'').replace(/https?:\/\/\S+/g,'').trim();
   const m = post.latest_metrics||{};
   const isBreaking = (post.matched_streams||[]).some(s=>s.toLowerCase().includes('breaking'));
-  return {
-    blocks: [
-      { type:'section', text:{ type:'mrkdwn', text:`${isBreaking?'🚨':'𝕏'} *${isBreaking?'BREAKING':'X POST'}*\n*<${post.source_url}|${text.slice(0,200)}${text.length>200?'…':''}>*` } },
-      { type:'context', elements:[
-        { type:'mrkdwn', text:`𝕏 *${author}* ${handle}  ·  ${followers}  ·  🕐 ${time}` },
-        { type:'mrkdwn', text:`❤️ ${m.likes||0}  🔁 ${m.reposts||0}  💬 ${m.replies||0}  👁 ${m.views||0}` }
-      ]},
-      { type:'divider' }
-    ],
-    unfurl_links: false
-  };
+  const tag = isBreaking ? '🚨 *BREAKING*' : '𝕏 *X POST*';
+  return `${tag}\n*<${post.source_url}|${text.slice(0,200)}${text.length>200?'…':''}>*\n𝕏 *${author}* ${handle}  ·  ${followers}  ·  🕐 ${time}\n❤️ ${m.likes||0}  🔁 ${m.reposts||0}  💬 ${m.replies||0}  👁 ${m.views||0}`;
 }
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
-  if (!SLACK_WEBHOOK) return res.status(500).json({ error: 'SLACK_NFL environment variable not set' });
+  if (!GCHAT_WEBHOOK) return res.status(500).json({ error: 'GCHAT_NFL environment variable not set' });
 
   const alerts = [], errors = [];
   const now = Date.now();
@@ -274,7 +257,6 @@ module.exports = async (req, res) => {
       fetchNocap()
     ]);
 
-    // Process news
     const seenUrls = new Set();
     for (const articles of newsResults) {
       for (const article of articles) {
@@ -286,13 +268,12 @@ module.exports = async (req, res) => {
         if (!article.title || article.title === '[Removed]') continue;
         lastArticleIds.add(id);
         try {
-          await postToSlack(SLACK_WEBHOOK, buildNewsMessage(article));
+          await postToGoogleChat(GCHAT_WEBHOOK, buildNewsText(article));
           alerts.push({ type:'news', title:article.title.slice(0,60) });
         } catch(e) { errors.push(e.message); }
       }
     }
 
-    // Process nocap posts
     for (const post of posts) {
       const id = post.post_id;
       if (lastPostIds.has(id)) continue;
@@ -304,7 +285,7 @@ module.exports = async (req, res) => {
       if (!isBreaking && !teams.length) continue;
       lastPostIds.add(id);
       try {
-        await postToSlack(SLACK_WEBHOOK, buildSocialMessage(post));
+        await postToGoogleChat(GCHAT_WEBHOOK, buildSocialText(post));
         alerts.push({ type:'social', text:post.text_preview?.slice(0,60) });
       } catch(e) { errors.push(e.message); }
     }
