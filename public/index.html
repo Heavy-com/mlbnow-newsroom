@@ -191,7 +191,7 @@
       <button class="source-tab active" id="tab-all" onclick="setSourceTab('all',this)">All <span class="tab-count" id="tab-count-all">—</span></button>
       <button class="source-tab" id="tab-news" onclick="setSourceTab('news',this)">📰 News <span class="tab-count" id="tab-count-news">—</span></button>
       <button class="source-tab" id="tab-transactions" onclick="setSourceTab('transactions',this)">🔄 Transactions <span class="tab-count" id="tab-count-transactions">—</span></button>
-      <button class="source-tab" id="tab-social" onclick="setSourceTab('social',this)">𝕏 X Posts <span class="tab-count" id="tab-count-social">—</span></button>
+      <button class="source-tab" id="tab-social" onclick="setSourceTab('social',this)">Social Posts <span class="tab-count" id="tab-count-social">—</span></button>
     </div>
 
     <div class="content-toolbar">
@@ -244,7 +244,7 @@ const LEAGUES = {
       {id:'nationals', label:'Washington Nationals',  division:'NL East',   color:'#AB0003', keywords:['washington nationals','nationals baseball']},
       {id:'cubs',      label:'Chicago Cubs',          division:'NL Central',color:'#0E3386', keywords:['chicago cubs','cubs baseball','wrigley']},
       {id:'reds',      label:'Cincinnati Reds',       division:'NL Central',color:'#C6011F', keywords:['cincinnati reds','reds baseball']},
-      {id:'rockies',   label:'Colorado Rockies',      division:'NL Central',color:'#333366', keywords:['colorado rockies','rockies baseball']},
+      {id:'rockies',   label:'Colorado Rockies',      division:'NL West',color:'#333366', keywords:['colorado rockies','rockies baseball']},
       {id:'brewers',   label:'Milwaukee Brewers',     division:'NL Central',color:'#FFC52F', keywords:['milwaukee brewers','brewers baseball']},
       {id:'cardinals', label:'St. Louis Cardinals',   division:'NL Central',color:'#C41E3A', keywords:['st. louis cardinals','cardinals baseball']},
       {id:'dbacks',    label:'Arizona Diamondbacks',  division:'NL West',   color:'#A71930', keywords:['arizona diamondbacks','d-backs']},
@@ -256,10 +256,10 @@ const LEAGUES = {
   },
   nfl: {
     label: 'NFL', emoji: '🏈', color: '#d4a017', tickerLabel: 'NFL WIRE',
-    hasTransactions: true, hasSocial: true,
+    hasTransactions: false, hasSocial: true,
     queries: [
-      'NFL trade signing free agent roster move 2025',
-      'NFL injury quarterback receiver 2025',
+      'NFL trade signing free agent roster move',
+      'NFL injury quarterback receiver',
       'Cowboys Patriots Eagles Chiefs Bears Giants NFL news',
       'Rams Steelers Ravens 49ers Packers Seahawks NFL news'
     ],
@@ -301,10 +301,10 @@ const LEAGUES = {
   },
   nba: {
     label: 'NBA', emoji: '🏀', color: '#e87722', tickerLabel: 'NBA WIRE',
-    hasTransactions: true, hasSocial: true,
+    hasTransactions: false, hasSocial: true,
     queries: [
-      'NBA trade signing free agent roster move 2025',
-      'NBA injury player out 2025',
+      'NBA trade signing free agent roster move',
+      'NBA injury player out',
       'Lakers Celtics Warriors Knicks Bulls Heat NBA news',
       'Bucks Suns Nuggets Clippers Nets Mavericks NBA news'
     ],
@@ -344,10 +344,10 @@ const LEAGUES = {
   },
   nhl: {
     label: 'NHL', emoji: '🏒', color: '#00b4d8', tickerLabel: 'NHL WIRE',
-    hasTransactions: true, hasSocial: true,
+    hasTransactions: false, hasSocial: true,
     queries: [
-      'NHL trade signing free agent roster move 2025',
-      'NHL injury player out 2025',
+      'NHL trade signing free agent roster move',
+      'NHL injury player out',
       'Rangers Bruins Maple Leafs Canadiens Penguins Capitals NHL news',
       'Oilers Avalanche Lightning Panthers Kings Sharks NHL news'
     ],
@@ -403,10 +403,11 @@ let activeSourceTab = 'all';
 // Cache per league
 const leagueCache = { mlb:{}, nfl:{}, nba:{}, nhl:{} };
 
-const txt = a => ((a.title||a.text_preview||'')+' '+(a.description||a.author?.display_name||'')).toLowerCase();
+const categoryText = a => (a.categories||[]).map(c=>typeof c==='string'?c:(c.category||'')).join(' ');
+const txt = a => ((a.title||a.text||a.text_preview||'')+' '+(a.description||a.author?.display_name||'')+' '+categoryText(a)).toLowerCase();
 const isTrade = a => TRADE_KW.some(k=>txt(a).includes(k));
 const isInjury = a => INJURY_KW.some(k=>txt(a).includes(k));
-const isBreaking = a => BREAKING_KW.some(k=>txt(a).includes(k)) || (a.matched_streams||[]).includes('Breaking MLB');
+const isBreaking = a => BREAKING_KW.some(k=>txt(a).includes(k)) || (a.matched_streams||[]).some(s=>String(s).toLowerCase().includes('breaking')) || categoryText(a).toLowerCase().includes('breaking');
 const timeAgo = d => { const s=(Date.now()-new Date(d))/1000; if(s<60)return`${~~s}s ago`; if(s<3600)return`${~~(s/60)}m ago`; if(s<86400)return`${~~(s/3600)}h ago`; return`${~~(s/86400)}d ago`; };
 const fmtDateTime = d => {
   const dt = new Date(d);
@@ -417,6 +418,12 @@ const fmtDateTime = d => {
 };
 const srcColor = n => { const c=['#3b7dd8','#2d9c5f','#d4860f','#9b59b6','#e8412a','#16a085']; let h=0; for(const x of(n||''))h=(h*31+x.charCodeAt(0))%c.length; return c[h]; };
 const initials = s => (s||'?').split(/\s+/).map(w=>w[0]).join('').toUpperCase().slice(0,2);
+const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const safeExternalUrl = value => /^https?:\/\//i.test(String(value||'')) ? String(value) : '';
+function openExternal(button) {
+  const url = safeExternalUrl(button?.dataset?.url);
+  if (url) window.open(url, '_blank', 'noopener,noreferrer');
+}
 
 function getLeague() { return LEAGUES[activeLeague]; }
 function getTeams() { return getLeague().teams; }
@@ -515,9 +522,10 @@ async function fetchAll() {
   if (nocapResult?.status==='fulfilled' && nocapResult.value?.items) {
     for (const p of nocapResult.value.items) {
       // Filter to posts matching the active league
-      const leagues = [...(p.matched_leagues||[]), ...(p.matched_streams||[])].map(s=>s.toUpperCase());
-      if (!leagues.includes(activeLeague.toUpperCase())) continue;
-      p._type='social'; p._teams=matchTeams(p);
+      const leagues = [...(p.matched_leagues||[]), ...(p.matched_streams||[])].map(s=>String(s).toUpperCase());
+      const teamMatches = matchTeams(p);
+      if (!leagues.includes(activeLeague.toUpperCase()) && !teamMatches.length) continue;
+      p._type='social'; p._teams=teamMatches;
       p._trade=isTrade(p); p._injury=isInjury(p); p._breaking=isBreaking(p);
       p._sortDate=new Date(p.created_at);
       socialPosts.push(p);
@@ -569,7 +577,7 @@ function updateTicker() {
   const all = [...newsArticles,...socialPosts].sort((a,b)=>b._sortDate-a._sortDate);
   const priority = all.filter(a=>a._breaking||a._trade).slice(0,10);
   const src = priority.length ? priority : all.slice(0,8);
-  const html = src.map(a=>`<span class="ticker-item">${a.title||a.text_preview}<span class="ticker-sep"> · </span></span>`).join('');
+  const html = src.map(a=>`<span class="ticker-item">${escapeHTML(a.title||a.text_preview)}<span class="ticker-sep"> · </span></span>`).join('');
   document.getElementById('tickerTrack').innerHTML = html+html;
 }
 
@@ -630,13 +638,19 @@ function renderCards() {
 }
 
 function renderNewsCard(a, delay) {
-  const sc = srcColor(a.source?.name);
-  const sn = (a.source?.name||'Unknown').toUpperCase().slice(0,14);
+  const sourceName = a.source?.name || 'Unknown';
+  const sc = srcColor(sourceName);
+  const sn = escapeHTML(sourceName.toUpperCase().slice(0,14));
   const type = a._breaking?'breaking':a._trade?'trade':a._injury?'injury':'';
   const teams = getTeams();
-  const teamTags = teams.filter(t=>(a._teams||[]).includes(t.id)).slice(0,2).map(t=>`<span class="team-tag" style="border-left:2px solid ${t.color}">${t.label.split(' ').slice(-1)[0]}</span>`).join('');
+  const teamTags = teams.filter(t=>(a._teams||[]).includes(t.id)).slice(0,2).map(t=>`<span class="team-tag" style="border-left:2px solid ${t.color}">${escapeHTML(t.label.split(' ').slice(-1)[0])}</span>`).join('');
+  const imageUrl = safeExternalUrl(a.urlToImage);
+  const articleUrl = safeExternalUrl(a.url);
+  const title = escapeHTML(a.title || 'Untitled');
+  const description = escapeHTML((a.description || '').slice(0,130));
+  const author = escapeHTML(a.author ? a.author.split(',')[0].slice(0,28) : 'Staff');
   return `<div class="card ${type}" style="animation-delay:${delay}ms">
-    ${a.urlToImage?`<img class="card-img" src="${a.urlToImage}" alt="" onerror="this.parentNode.removeChild(this)">` :''}
+    ${imageUrl?`<img class="card-img" src="${escapeHTML(imageUrl)}" alt="" onerror="this.parentNode.removeChild(this)">` :''}
     <div class="card-body">
       <div class="card-meta">
         <span class="source-tag" style="background:${sc}22;color:${sc};border:1px solid ${sc}44">${sn}</span>
@@ -646,14 +660,14 @@ function renderNewsCard(a, delay) {
         ${teamTags}
       </div>
       <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);margin-bottom:4px">${timeAgo(a.publishedAt)} &nbsp;·&nbsp; ${fmtDateTime(a.publishedAt)}</div>
-      <div class="card-title">${a.title}</div>
-      ${a.description?`<div class="card-excerpt">${a.description.slice(0,130)}…</div>`:''}
+      <div class="card-title">${title}</div>
+      ${description?`<div class="card-excerpt">${description}${(a.description||'').length>130?'…':''}</div>`:''}
     </div>
     <div class="card-footer">
-      <span class="card-author">${a.author?a.author.split(',')[0].slice(0,28):'Staff'}</span>
+      <span class="card-author">${author}</span>
       <div style="display:flex;gap:6px">
-        <button class="btn-read" onclick="window.open('${a.url}','_blank')">Read →</button>
-        <button class="btn-assign" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
+        <button class="btn-read" data-url="${escapeHTML(articleUrl)}" onclick="openExternal(this)" ${articleUrl?'':'disabled'}>Read →</button>
+        <button class="btn-assign" title="This state is local to the current browser session" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
       </div>
     </div>
   </div>`;
@@ -661,17 +675,23 @@ function renderNewsCard(a, delay) {
 
 function renderSocialCard(p, delay) {
   const type = p._breaking?'breaking':p._trade?'trade':p._injury?'injury':'';
+  const sourceName = (p.source||'social').toUpperCase();
+  const sourceLabel = p.source==='x' ? '𝕏 POST' : `${sourceName} POST`;
   const teams = getTeams();
-  const teamTags = teams.filter(t=>(p._teams||[]).includes(t.id)).slice(0,2).map(t=>`<span class="team-tag" style="border-left:2px solid ${t.color}">${t.label.split(' ').slice(-1)[0]}</span>`).join('');
+  const teamTags = teams.filter(t=>(p._teams||[]).includes(t.id)).slice(0,2).map(t=>`<span class="team-tag" style="border-left:2px solid ${t.color}">${escapeHTML(t.label.split(' ').slice(-1)[0])}</span>`).join('');
   const streams = (p.matched_streams||[]).filter(s=>!['MLB','Breaking MLB'].includes(s)).slice(0,3);
   const followers = p.author?.followers_count ? `${(p.author.followers_count/1000).toFixed(0)}K followers` : '';
   const m = p.latest_metrics||{};
+  const displayName = escapeHTML(p.author?.display_name||p.author?.username||'Unknown');
+  const username = escapeHTML(p.author?.username||'unknown');
+  const postText = escapeHTML((p.text_preview||'').replace(/https?:\/\/\S+/g,'').trim());
+  const postUrl = safeExternalUrl(p.source_url);
   return `<div class="card social ${type}" style="animation-delay:${delay}ms">
     <div class="social-header">
-      <div class="social-avatar">${initials(p.author?.display_name||p.author?.username||'?')}</div>
-      <div><div class="social-name">${p.author?.display_name||p.author?.username}</div><div class="social-handle">@${p.author?.username} · ${followers}</div></div>
+      <div class="social-avatar">${escapeHTML(initials(p.author?.display_name||p.author?.username||'?'))}</div>
+      <div><div class="social-name">${displayName}</div><div class="social-handle">@${username} · ${escapeHTML(followers)}</div></div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-        <span class="type-tag type-social">𝕏 POST</span>
+        <span class="type-tag type-social">${escapeHTML(sourceLabel)}</span>
         <span class="card-time" title="${fmtDateTime(p.created_at)}">${timeAgo(p.created_at)} · ${fmtDateTime(p.created_at)}</span>
       </div>
     </div>
@@ -681,19 +701,19 @@ function renderSocialCard(p, delay) {
         ${type==='trade'?'<span class="type-tag type-trade">TRADE</span>':''}
         ${teamTags}
       </div>
-      <div class="social-text">${(p.text_preview||'').replace(/https?:\/\/\S+/g,'').trim()}</div>
+      <div class="social-text">${postText}</div>
     </div>
     <div class="social-metrics">
-      <div class="metric">❤️ <span>${m.likes||0}</span></div>
-      <div class="metric">🔁 <span>${m.reposts||0}</span></div>
-      <div class="metric">💬 <span>${m.replies||0}</span></div>
-      <div class="metric">👁 <span>${m.views||0}</span></div>
+      <div class="metric">❤️ <span>${Number(m.likes)||0}</span></div>
+      <div class="metric">🔁 <span>${Number(m.reposts)||0}</span></div>
+      <div class="metric">💬 <span>${Number(m.replies)||0}</span></div>
+      <div class="metric">👁 <span>${Number(m.views)||0}</span></div>
     </div>
     <div class="social-footer">
-      <div class="stream-tags">${streams.map(s=>`<span class="stream-tag">${s}</span>`).join('')}</div>
+      <div class="stream-tags">${streams.map(s=>`<span class="stream-tag">${escapeHTML(s)}</span>`).join('')}</div>
       <div style="display:flex;gap:6px">
-        <button class="btn-read" onclick="window.open('${p.source_url}','_blank')">View on X →</button>
-        <button class="btn-assign" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
+        <button class="btn-read" data-url="${escapeHTML(postUrl)}" onclick="openExternal(this)" ${postUrl?'':'disabled'}>View post →</button>
+        <button class="btn-assign" title="This state is local to the current browser session" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
       </div>
     </div>
   </div>`;
@@ -702,25 +722,27 @@ function renderSocialCard(p, delay) {
 function renderTransactionCard(t, delay) {
   const typeEmoji = t._category==='trade'?'🔄':t._category==='injury'?'🏥':'📋';
   const teams = getTeams();
-  const teamTags = teams.filter(tm=>(t._teams||[]).includes(tm.id)).slice(0,2).map(tm=>`<span class="team-tag" style="border-left:2px solid ${tm.color}">${tm.label.split(' ').slice(-1)[0]}</span>`).join('');
-  const fromTo = t.fromTeam&&t.toTeam?`<span>${t.fromTeam}</span><span class="tx-arrow">→</span><span>${t.toTeam}</span>`:t.fromTeam?`<span>${t.fromTeam}</span>`:t.toTeam?`<span>${t.toTeam}</span>`:'';
+  const teamTags = teams.filter(tm=>(t._teams||[]).includes(tm.id)).slice(0,2).map(tm=>`<span class="team-tag" style="border-left:2px solid ${tm.color}">${escapeHTML(tm.label.split(' ').slice(-1)[0])}</span>`).join('');
+  const fromTeam = escapeHTML(t.fromTeam||'');
+  const toTeam = escapeHTML(t.toTeam||'');
+  const fromTo = t.fromTeam&&t.toTeam?`<span>${fromTeam}</span><span class="tx-arrow">→</span><span>${toTeam}</span>`:t.fromTeam?`<span>${fromTeam}</span>`:t.toTeam?`<span>${toTeam}</span>`:'';
   const dateObj = new Date(t.date);
-  const date = dateObj.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + (t.date.includes('T') ? ' · ' + dateObj.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '');
+  const date = dateObj.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + (String(t.date).includes('T') ? ' · ' + dateObj.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '');
   const leagueLabel = activeLeague.toUpperCase();
   return `<div class="card transaction" style="animation-delay:${delay}ms">
     <div class="tx-body">
       <div class="card-meta">
-        <span class="type-tag type-trade">${typeEmoji} ${t.transactionType||'Transaction'}</span>
+        <span class="type-tag type-trade">${typeEmoji} ${escapeHTML(t.transactionType||'Transaction')}</span>
         ${teamTags}
-        <span class="card-time">${date}</span>
+        <span class="card-time">${escapeHTML(date)}</span>
       </div>
-      <div class="tx-player">${t.player||'Unknown'}</div>
-      <div class="tx-desc">${t.description||''}</div>
+      <div class="tx-player">${escapeHTML(t.player||'Unknown')}</div>
+      <div class="tx-desc">${escapeHTML(t.description||'')}</div>
       ${fromTo?`<div class="tx-teams">${fromTo}</div>`:''}
     </div>
     <div class="card-footer">
       <span style="color:#a78bfa;font-size:10px;font-family:'DM Mono',monospace">${leagueLabel} OFFICIAL</span>
-      <button class="btn-assign" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
+      <button class="btn-assign" title="This state is local to the current browser session" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
     </div>
   </div>`;
 }

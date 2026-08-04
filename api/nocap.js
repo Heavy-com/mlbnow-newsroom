@@ -1,87 +1,56 @@
-// api/nocap.js — Vercel serverless function
-// Proxies signal.nocap.lv live feed with 5-minute caching
-// Requires NOCAP_SESSION environment variable (session cookie from browser)
+// Stable Signalizacija proxy with short caching and legacy-session fallback.
 
-const https = require('https');
+const { fetchSignalPosts, getSignalCredentials } = require('../lib/signal');
 
-const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
-let cache = null;
+const CACHE_DURATION_MS = 45 * 1000;
+const cache = new Map();
 
-function fetchNocap() {
-  return new Promise((resolve, reject) => {
-    const session = process.env.NOCAP_SESSION;
-    if (!session) {
-      return reject(new Error('NOCAP_SESSION environment variable not set'));
-    }
-
-    const options = {
-      hostname: 'signal.nocap.lv',
-      path: '/api/v1/feeds/live?limit=50&time_range=24h&sort=recency&include_low_trust=true&include_blocked=false',
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Content-Type': 'application/json',
-        'Cookie': `signalizacija_session=${session}`,
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin'
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const body = JSON.parse(data);
-          resolve({ status: res.statusCode, body });
-        } catch (e) {
-          reject(new Error(`Failed to parse nocap response: ${data.slice(0, 200)}`));
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.end();
-  });
+function getOptions(req) {
+  const url = new URL(req.url, 'https://heavy-newsroom.local');
+  const allowed = [
+    'limit', 'metrics', 'source', 'category', 'author', 'search',
+    'created_after', 'created_before', 'collected_after', 'metric_limit', 'cursor',
+  ];
+  return Object.fromEntries(
+    allowed
+      .map((key) => [key, url.searchParams.get(key)])
+      .filter(([, value]) => value !== null && value !== '')
+  );
 }
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'no-store');
 
-  if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
+  const options = getOptions(req);
+  const cacheKey = JSON.stringify(options);
   const now = Date.now();
+  const cached = cache.get(cacheKey);
 
-  // Return cached result if still fresh
-  if (cache && (now - cache.timestamp) < CACHE_DURATION_MS) {
-    const age = Math.floor((now - cache.timestamp) / 1000);
+  if (cached && now - cached.timestamp < CACHE_DURATION_MS) {
     res.setHeader('X-Cache', 'HIT');
-    res.setHeader('X-Cache-Age', `${age}s`);
-    return res.status(200).json(cache.data);
+    res.setHeader('X-Cache-Age', `${Math.floor((now - cached.timestamp) / 1000)}s`);
+    return res.status(200).json(cached.data);
   }
 
   try {
-    const { status, body } = await fetchNocap();
-
-    if (status === 401) {
-      return res.status(401).json({ 
-        error: 'Session expired. Update NOCAP_SESSION in Vercel environment variables.',
-        detail: body.detail || 'authentication required'
-      });
-    }
-
-    if (status === 200 && body.items) {
-      cache = { timestamp: now, data: body };
-    }
+    const { status, body } = await fetchSignalPosts(options);
+    if (status === 200) cache.set(cacheKey, { timestamp: now, data: body });
 
     res.setHeader('X-Cache', 'MISS');
-    res.status(status).json(body);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.status(status).json(body);
+  } catch (error) {
+    const credentials = getSignalCredentials();
+    const status = error.code === 'SIGNAL_CREDENTIAL_MISSING' ? 503 : 500;
+    return res.status(status).json({
+      error: error.message,
+      credential_mode: credentials.mode,
+      expected_env: ['SIGNAL_API_TOKEN', 'SIGNALIZACIJA_API_TOKEN', 'NOCAP_SESSION'],
+    });
   }
 };

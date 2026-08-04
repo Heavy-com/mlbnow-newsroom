@@ -2,8 +2,9 @@
 // MLB alerts via Google Chat — news, nocap social, transactions
 
 const https = require('https');
+const { fetchSignalPosts } = require('../lib/signal');
+const { authorizeAlertRequest } = require('../lib/alert-auth');
 
-const NOCAP_SESSION = process.env.NOCAP_SESSION || '';
 const GCHAT_WEBHOOK = process.env.GCHAT_MLB;
 const BASE_URL = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://heavy-newsroom.vercel.app';
 
@@ -33,7 +34,7 @@ function txt(a) {
 function classify(a) {
   const t = txt(a);
   const types = [];
-  if (BREAKING_KW.some(k => t.includes(k)) || (a.matched_streams||[]).includes('Breaking MLB')) types.push('breaking');
+  if (BREAKING_KW.some(k => t.includes(k)) || (a.matched_streams||[]).some(s => String(s).toLowerCase().includes('breaking'))) types.push('breaking');
   if (TRADE_KW.some(k => t.includes(k))) types.push('trade');
   if (INJURY_KW.some(k => t.includes(k))) types.push('injury');
   return types;
@@ -108,15 +109,17 @@ function fetchFromCache(q) {
 }
 
 async function fetchSocialPosts() {
-  if (!NOCAP_SESSION) return [];
   try {
-    const { status, body } = await fetchJSON(
-      'signal.nocap.lv',
-      '/api/v1/feeds/live?limit=50&time_range=24h&sort=recency&include_low_trust=true&include_blocked=false',
-      { 'Cookie': `signalizacija_session=${NOCAP_SESSION}`, 'Content-Type': 'application/json' }
-    );
-    return status === 200 && body.items ? body.items : [];
-  } catch (e) { return []; }
+    const createdAfter = new Date(Date.now() - FRESHNESS_MS).toISOString();
+    const { status, body } = await fetchSignalPosts({
+      limit: 200,
+      metrics: 'latest',
+      created_after: createdAfter,
+    });
+    return status === 200 && Array.isArray(body.items) ? body.items : [];
+  } catch (error) {
+    return [];
+  }
 }
 
 async function fetchTransactions() {
@@ -173,6 +176,7 @@ function buildTransactionText(t, teamId) {
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+  if (!authorizeAlertRequest(req, res)) return;
   if (!GCHAT_WEBHOOK) return res.status(500).json({ error: 'GCHAT_MLB environment variable not set' });
 
   const alerts = [], errors = [];

@@ -1,7 +1,9 @@
-name: Refresh Nocap Session
+name: Legacy Nocap Session Refresh (Deprecated)
+
+# The stable Signalizacija bearer token does not require session refreshes.
+# Keep this workflow only as a manual fallback while migrating an old
+# signalizacija_session cookie stored as NOCAP_SESSION in Vercel.
 on:
-  schedule:
-    - cron: '0 6 * * *'  # every day at 6am UTC
   workflow_dispatch:
 
 jobs:
@@ -11,99 +13,63 @@ jobs:
       - name: Login to nocap and get session cookie
         id: login
         run: |
-          RESPONSE=$(curl -s -c cookies.txt -w "\n%{http_code}" \
+          RESPONSE=$(curl --silent --show-error -c cookies.txt -w "\n%{http_code}" \
             -X POST "https://signal.nocap.lv/api/v1/auth/login" \
             -H "Content-Type: application/json" \
             -d "{\"username\": \"${{ secrets.NOCAP_USERNAME }}\", \"password\": \"${{ secrets.NOCAP_PASSWORD }}\"}")
-          
+
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           echo "Login HTTP status: $HTTP_CODE"
-          
+
           if [ "$HTTP_CODE" != "200" ]; then
             echo "Login failed with status $HTTP_CODE"
             exit 1
           fi
-          
+
           SESSION=$(grep 'signalizacija_session' cookies.txt | awk '{print $NF}')
-          
+
           if [ -z "$SESSION" ]; then
             echo "No session cookie found"
-            cat cookies.txt
             exit 1
           fi
-          
-          echo "Session cookie obtained successfully"
-          echo "session=$SESSION" >> $GITHUB_OUTPUT
 
-      - name: Get existing env var ID from Vercel
+          echo "session=$SESSION" >> "$GITHUB_OUTPUT"
+
+      - name: Get existing Vercel environment variable ID
         id: getenv
         run: |
-          RESPONSE=$(curl -s \
+          RESPONSE=$(curl --silent --show-error \
             "https://api.vercel.com/v9/projects/${{ secrets.VERCEL_PROJECT_ID }}/env" \
             -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}")
-          
+
           ENV_ID=$(echo "$RESPONSE" | python3 -c "
           import sys, json
           data = json.load(sys.stdin)
-          envs = data.get('envs', [])
-          for e in envs:
-              if e.get('key') == 'NOCAP_SESSION':
-                  print(e.get('id',''))
+          for env in data.get('envs', []):
+              if env.get('key') == 'NOCAP_SESSION':
+                  print(env.get('id', ''))
                   break
           ")
-          
+
           if [ -z "$ENV_ID" ]; then
             echo "NOCAP_SESSION env var not found in Vercel project"
-            echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print([e['key'] for e in d.get('envs',[])])"
             exit 1
           fi
-          
-          echo "Found env var ID: $ENV_ID"
-          echo "env_id=$ENV_ID" >> $GITHUB_OUTPUT
+
+          echo "env_id=$ENV_ID" >> "$GITHUB_OUTPUT"
 
       - name: Update NOCAP_SESSION in Vercel
         run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
+          RESPONSE=$(curl --silent --show-error -w "\n%{http_code}" \
             -X PATCH "https://api.vercel.com/v9/projects/${{ secrets.VERCEL_PROJECT_ID }}/env/${{ steps.getenv.outputs.env_id }}" \
             -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"value\": \"${{ steps.login.outputs.session }}\", \"target\": [\"production\", \"preview\"]}")
-          
+
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          echo "Vercel update HTTP status: $HTTP_CODE"
-          
           if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
-            echo "Failed to update Vercel env var"
-            echo "$RESPONSE"
+            echo "Failed to update Vercel env var (HTTP $HTTP_CODE)"
             exit 1
           fi
-          
-          echo "NOCAP_SESSION updated successfully"
 
-      - name: Trigger redeploy
-        run: |
-          # Get latest deployment and redeploy it
-          DEPLOY=$(curl -s \
-            "https://api.vercel.com/v6/deployments?projectId=${{ secrets.VERCEL_PROJECT_ID }}&limit=1&target=production" \
-            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}")
-          
-          DEPLOY_ID=$(echo "$DEPLOY" | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          deps = data.get('deployments', [])
-          if deps: print(deps[0].get('uid',''))
-          ")
-          
-          if [ -z "$DEPLOY_ID" ]; then
-            echo "Could not find latest deployment, skipping redeploy"
-            exit 0
-          fi
-          
-          curl -s -X POST "https://api.vercel.com/v13/deployments?forceNew=1" \
-            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"name\": \"heavy-newsroom\", \"deploymentId\": \"$DEPLOY_ID\", \"target\": \"production\"}" \
-            > /dev/null
-          
-          echo "Redeploy triggered successfully"
-          echo "Nocap session refresh complete"
+          echo "Legacy NOCAP_SESSION updated. Redeploy the project if required."

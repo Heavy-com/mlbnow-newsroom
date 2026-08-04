@@ -4,7 +4,7 @@
 
 const https = require('https');
 
-const API_KEY = process.env.NEWS_API_KEY || 'eba3bb2993124fb0b3c1117f7535afc2';
+const API_KEY = process.env.NEWS_API_KEY || '';
 const NEWS_CACHE_MS = 15 * 60 * 1000;
 const TX_CACHE_MS   =  2 * 60 * 1000;
 
@@ -93,6 +93,7 @@ module.exports = async (req, res) => {
   }
 
   // ── NEWS API ─────────────────────────────────────────────────────────────────
+  if (!API_KEY) return res.status(503).json({ error: 'NEWS_API_KEY environment variable not set' });
   const q        = url.query.q        || 'entertainment';
   const pageSize = url.query.pageSize || '25';
   const sortBy   = url.query.sortBy   || 'publishedAt';

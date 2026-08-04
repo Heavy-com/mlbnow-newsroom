@@ -1,10 +1,11 @@
 // api/nba-alerts.js — Vercel serverless function
 // GNews + nocap social posts for NBA alerts, posted to Google Chat
 const https = require('https');
+const { fetchSignalPosts } = require('../lib/signal');
+const { authorizeAlertRequest } = require('../lib/alert-auth');
 
-const GNEWS_KEY = process.env.GNEWS_API_KEY || '615675b7f4505dd2b4567dfa0b0c86f6';
+const GNEWS_KEY = process.env.GNEWS_API_KEY || '';
 const GCHAT_WEBHOOK = process.env.GCHAT_NBA;
-const NOCAP_SESSION = process.env.NOCAP_SESSION || '';
 
 const FRESHNESS_MS = 6 * 60 * 60 * 1000;
 let lastArticleIds = new Set();
@@ -175,6 +176,7 @@ function request(hostname, path, headers={}) {
 }
 
 async function fetchArticles(q) {
+  if (!GNEWS_KEY) return [];
   try {
     const { status, body } = await request('gnews.io', `/v4/search?q=${encodeURIComponent(q)}&lang=en&max=10&token=${GNEWS_KEY}&sortby=publishedAt`);
     if (status === 200 && body.articles?.length) {
@@ -185,18 +187,23 @@ async function fetchArticles(q) {
 }
 
 async function fetchNocap() {
-  if (!NOCAP_SESSION) return [];
   try {
-    const { status, body } = await request('signal.nocap.lv',
-      '/api/v1/feeds/live?limit=50&time_range=24h&sort=recency&include_low_trust=true&include_blocked=false',
-      { 'Cookie': `signalizacija_session=${NOCAP_SESSION}`, 'Content-Type': 'application/json' }
-    );
-    if (status !== 200 || !body.items) return [];
-    return body.items.filter(p => {
-      const leagues = [...(p.matched_leagues||[]), ...(p.matched_streams||[])].map(s => s.toUpperCase());
-      return leagues.includes('NBA');
+    const createdAfter = new Date(Date.now() - FRESHNESS_MS).toISOString();
+    const { status, body } = await fetchSignalPosts({
+      limit: 200,
+      metrics: 'latest',
+      created_after: createdAfter,
     });
-  } catch(e) { return []; }
+    if (status !== 200 || !Array.isArray(body.items)) return [];
+    return body.items.filter((post) => {
+      const leagues = [...(post.matched_leagues || []), ...(post.matched_streams || [])]
+        .map((value) => String(value).toUpperCase());
+      const text = `${post.text_preview || ''} ${post.categories?.map((c) => c.category || c).join(' ') || ''}`.toLowerCase();
+      return leagues.includes('NBA') || matchTeams(text).length > 0;
+    });
+  } catch (error) {
+    return [];
+  }
 }
 
 function postToGoogleChat(webhookUrl, text) {
@@ -245,6 +252,7 @@ function buildSocialText(post) {
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+  if (!authorizeAlertRequest(req, res)) return;
   if (!GCHAT_WEBHOOK) return res.status(500).json({ error: 'GCHAT_NBA environment variable not set' });
 
   const alerts = [], errors = [];
