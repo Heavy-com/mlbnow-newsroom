@@ -11,6 +11,13 @@ const REQUEST_TIMEOUT_MS = 8 * 1000;
 
 const cache = {};
 
+function setEdgeCache(res, maxAge = 60, staleSeconds = 120) {
+  res.setHeader(
+    'Vercel-CDN-Cache-Control',
+    `public, max-age=${maxAge}, stale-while-revalidate=${staleSeconds}`
+  );
+}
+
 function fetchJSON(hostname, path, headers = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -62,6 +69,8 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // Browsers should always check Vercel; only Vercel's edge may reuse responses.
+  res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
 
   const url = require('url').parse(req.url, true);
@@ -75,6 +84,7 @@ module.exports = async (req, res) => {
     // Skip cache if bust param provided
     const bustCache = url.query.bust;
     if (!bustCache && cache[key] && (now - cache[key].timestamp) < TX_CACHE_MS) {
+      setEdgeCache(res, 60, 120);
       res.setHeader('X-Cache', 'HIT');
       return res.status(200).json(cache[key].data);
     }
@@ -87,6 +97,7 @@ module.exports = async (req, res) => {
         .sort((a, b) => new Date(b.date) - new Date(a.date));
       const data = { transactions, count: transactions.length, fetchedAt: new Date().toISOString() };
       cache[key] = { timestamp: now, data };
+      setEdgeCache(res, 60, 120);
       res.setHeader('X-Cache', 'MISS');
       return res.status(200).json(data);
     } catch (e) {
@@ -102,6 +113,7 @@ module.exports = async (req, res) => {
   const cacheKey = `${q}__${pageSize}__${sortBy}`;
 
   if (cache[cacheKey] && (now - cache[cacheKey].timestamp) < NEWS_CACHE_MS) {
+    setEdgeCache(res, 60, 120);
     res.setHeader('X-Cache', 'HIT');
     return res.status(200).json(cache[cacheKey].data);
   }
@@ -110,7 +122,10 @@ module.exports = async (req, res) => {
     const from = new Date(Date.now() - 24*60*60*1000).toISOString();
     const path = `/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&pageSize=${pageSize}&from=${from}&apiKey=${API_KEY}`;
     const { status, body } = await fetchJSON('newsapi.org', path);
-    if (status === 200 && body.status === 'ok') cache[cacheKey] = { timestamp: now, data: body };
+    if (status === 200 && body.status === 'ok') {
+      cache[cacheKey] = { timestamp: now, data: body };
+      setEdgeCache(res, 60, 120);
+    }
     res.setHeader('X-Cache', 'MISS');
     return res.status(status).json(body);
   } catch (e) {

@@ -5,6 +5,13 @@ const { fetchSignalPosts, getSignalCredentials } = require('../lib/signal');
 const CACHE_DURATION_MS = 45 * 1000;
 const cache = new Map();
 
+function setEdgeCache(res) {
+  res.setHeader(
+    'Vercel-CDN-Cache-Control',
+    'public, max-age=30, stale-while-revalidate=60'
+  );
+}
+
 function getOptions(req) {
   const url = new URL(req.url, 'https://heavy-newsroom.local');
   const allowed = [
@@ -33,6 +40,7 @@ module.exports = async (req, res) => {
   const cached = cache.get(cacheKey);
 
   if (cached && now - cached.timestamp < CACHE_DURATION_MS) {
+    setEdgeCache(res);
     res.setHeader('X-Cache', 'HIT');
     res.setHeader('X-Cache-Age', `${Math.floor((now - cached.timestamp) / 1000)}s`);
     return res.status(200).json(cached.data);
@@ -40,7 +48,10 @@ module.exports = async (req, res) => {
 
   try {
     const { status, body } = await fetchSignalPosts(options);
-    if (status === 200) cache.set(cacheKey, { timestamp: now, data: body });
+    if (status === 200) {
+      cache.set(cacheKey, { timestamp: now, data: body });
+      setEdgeCache(res);
+    }
 
     res.setHeader('X-Cache', 'MISS');
     return res.status(status).json(body);

@@ -1,8 +1,16 @@
 const https = require('https');
+
+function setEdgeCache(res) {
+  res.setHeader(
+    'Vercel-CDN-Cache-Control',
+    'public, max-age=30, stale-while-revalidate=60'
+  );
+}
 const REQUEST_TIMEOUT_MS = 8 * 1000;
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'no-store');
 
   const d = new Date();
   const today = d.toISOString().split('T')[0];
@@ -47,5 +55,6 @@ module.exports = async (req, res) => {
     };
   }).sort((a,b) => new Date(b.date) - new Date(a.date));
 
+  setEdgeCache(res);
   res.status(200).json({ transactions, count: transactions.length, fetchedAt: new Date().toISOString() });
 };
