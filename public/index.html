@@ -749,31 +749,28 @@ function renderTransactionCard(t, delay) {
 
 function updateClock(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 setInterval(updateClock,1000); updateClock();
-// Background refresh all leagues every 5 minutes
+// Refresh only the league currently being viewed.
 const TX_ENDPOINTS = { mlb:'/api/transactions', nhl:'/api/nhl-transactions', nba:'/api/nba-transactions', nfl:'/api/nfl-transactions' };
+const AUTO_REFRESH_MS = 5 * 60 * 1000;
 
-async function refreshLeagueInBackground(league) {
-  const lg = LEAGUES[league];
-  try {
-    const fetches = [
-      Promise.allSettled(lg.queries.map(q => fetch(`/api/news?q=${encodeURIComponent(q)}&pageSize=20`).then(r => r.json())))
-    ];
-    if (lg.hasTransactions) fetches.push(fetch(TX_ENDPOINTS[league]).then(r => r.json()).catch(() => null));
-    if (lg.hasSocial) fetches.push(fetch('/api/nocap').then(r => r.json()).catch(() => null));
-    const results = await Promise.all(fetches);
-    leagueCache[league] = { newsResults: results[0], txResult: lg.hasTransactions ? results[1] : null, nocapResult: lg.hasSocial ? results[lg.hasTransactions ? 2 : 1] : null, ts: Date.now() };
-  } catch(e) { /* silent */ }
-}
-
-async function refreshAllLeagues() {
-  const current = activeLeague;
-  // Refresh all background leagues in parallel
-  await Promise.all(['mlb','nfl','nba','nhl'].filter(l => l !== current).map(refreshLeagueInBackground));
-  // Refresh active league visibly
+function refreshActiveLeague() {
+  // Do not make feed requests while the browser tab is hidden.
+  if (document.hidden) return;
   fetchAll();
 }
 
-setInterval(refreshAllLeagues, 5 * 60 * 1000);
+setInterval(refreshActiveLeague, AUTO_REFRESH_MS);
+
+// When returning to the tab, refresh only if the active league data is stale.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+
+  const cached = leagueCache[activeLeague];
+  const isStale = !cached?.ts || (Date.now() - cached.ts) >= AUTO_REFRESH_MS;
+
+  if (isStale) fetchAll();
+});
+
 window.addEventListener('load', fetchAll);
 </script>
 </body>
