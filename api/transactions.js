@@ -1,4 +1,5 @@
 const https = require('https');
+const REQUEST_TIMEOUT_MS = 8 * 1000;
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,12 +14,14 @@ module.exports = async (req, res) => {
       hostname: 'statsapi.mlb.com',
       path: `/api/v1/transactions?startDate=${yesterday}&endDate=${today}&sportId=1`,
       method: 'GET',
+      timeout: REQUEST_TIMEOUT_MS,
       headers: { 'Accept': 'application/json', 'User-Agent': 'HeavyOnMLB/1.0' }
     }, (r) => {
       let body = '';
       r.on('data', c => body += c);
       r.on('end', () => { try { resolve(JSON.parse(body)); } catch(e) { resolve({}); } });
     });
+    req2.on('timeout', () => req2.destroy(new Error('MLB request timed out')));
     req2.on('error', () => resolve({}));
     req2.end();
   });

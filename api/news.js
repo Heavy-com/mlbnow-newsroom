@@ -7,13 +7,14 @@ const https = require('https');
 const API_KEY = process.env.NEWS_API_KEY || '';
 const NEWS_CACHE_MS = 15 * 60 * 1000;
 const TX_CACHE_MS   =  2 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 8 * 1000;
 
 const cache = {};
 
-function fetchJSON(hostname, path, headers = {}) {
+function fetchJSON(hostname, path, headers = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const req = https.request(
-      { hostname, path, method: 'GET', headers: { 'Accept': 'application/json', 'User-Agent': 'HeavyOnMLB/1.0', ...headers } },
+      { hostname, path, method: 'GET', timeout: timeoutMs, headers: { 'Accept': 'application/json', 'User-Agent': 'HeavyOnMLB/1.0', ...headers } },
       res => {
         let data = '';
         res.on('data', c => data += c);
@@ -23,6 +24,7 @@ function fetchJSON(hostname, path, headers = {}) {
         });
       }
     );
+    req.on('timeout', () => req.destroy(new Error('Upstream request timed out')));
     req.on('error', reject);
     req.end();
   });
