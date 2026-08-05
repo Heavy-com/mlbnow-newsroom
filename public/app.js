@@ -121,10 +121,10 @@ const LEAGUES = {
       {id:'jazz',       label:'Utah Jazz',               division:'Northwest', color:'#002B5C', keywords:['utah jazz','jazz basketball']},
       {id:'warriors',   label:'Golden State Warriors',   division:'Pacific',   color:'#1D428A', keywords:['golden state warriors','warriors basketball','curry']},
       {id:'clippers',   label:'LA Clippers',             division:'Pacific',   color:'#C8102E', keywords:['la clippers','clippers basketball']},
-      {id:'lakers',     label:'Los Angeles Lakers',      division:'Pacific',   color:'#552583', keywords:['los angeles lakers','lakers basketball','lebron']},
+      {id:'lakers',     label:'Los Angeles Lakers',      division:'Pacific',   color:'#552583', keywords:['los angeles lakers','lakers basketball','lebron','luka','luka doncic','luka dončić']},
       {id:'suns',       label:'Phoenix Suns',            division:'Pacific',   color:'#1D1160', keywords:['phoenix suns','suns basketball']},
       {id:'kings',      label:'Sacramento Kings',        division:'Pacific',   color:'#5A2D81', keywords:['sacramento kings','kings basketball']},
-      {id:'mavericks',  label:'Dallas Mavericks',        division:'Southwest', color:'#00538C', keywords:['dallas mavericks','mavericks basketball','mavs','luka']},
+      {id:'mavericks',  label:'Dallas Mavericks',        division:'Southwest', color:'#00538C', keywords:['dallas mavericks','mavericks basketball','mavs']},
       {id:'rockets',    label:'Houston Rockets',         division:'Southwest', color:'#CE1141', keywords:['houston rockets','rockets basketball']},
       {id:'grizzlies',  label:'Memphis Grizzlies',       division:'Southwest', color:'#5D76A9', keywords:['memphis grizzlies','grizzlies basketball']},
       {id:'pelicans',   label:'New Orleans Pelicans',    division:'Southwest', color:'#0C2340', keywords:['new orleans pelicans','pelicans basketball']},
@@ -158,7 +158,7 @@ const LEAGUES = {
       {id:'flyers',     label:'Philadelphia Flyers',     division:'Metropolitan',  color:'#F74902', keywords:['philadelphia flyers','flyers hockey']},
       {id:'penguins',   label:'Pittsburgh Penguins',     division:'Metropolitan',  color:'#FCB514', keywords:['pittsburgh penguins','penguins hockey','crosby']},
       {id:'capitals',   label:'Washington Capitals',     division:'Metropolitan',  color:'#041E42', keywords:['washington capitals','capitals hockey','ovechkin']},
-      {id:'coyotes',    label:'Utah Hockey Club',        division:'Central',       color:'#69B3E7', keywords:['utah hockey club','utah hc']},
+      {id:'mammoth',    label:'Utah Mammoth',            division:'Central',       color:'#69B3E7', keywords:['utah mammoth','mammoth hockey','utah hockey club','utah hc']},
       {id:'blackhawks', label:'Chicago Blackhawks',      division:'Central',       color:'#CF0A2C', keywords:['chicago blackhawks','blackhawks hockey']},
       {id:'avalanche',  label:'Colorado Avalanche',      division:'Central',       color:'#6F263D', keywords:['colorado avalanche','avalanche hockey']},
       {id:'stars',      label:'Dallas Stars',            division:'Central',       color:'#006847', keywords:['dallas stars','stars hockey']},
@@ -188,6 +188,7 @@ let socialPosts = [];
 let transactions = [];
 let activeCategory = 'all';
 let activeSourceTab = 'all';
+let fetchRequestId = 0;
 
 // Cache per league
 const leagueCache = { mlb:{}, nfl:{}, nba:{}, nhl:{} };
@@ -260,82 +261,125 @@ async function setLeague(league, el) {
 }
 
 async function fetchAll() {
+  const requestId = ++fetchRequestId;
+  const requestedLeague = activeLeague;
+  const league = LEAGUES[requestedLeague];
   const btn = document.getElementById('refreshBtn');
   btn.classList.add('spinning');
   document.getElementById('cardsGrid').innerHTML = '<div class="state-box"><div class="spinner"></div><span>Connecting to sources…</span></div>';
 
-  const league = getLeague();
-  const cached = leagueCache[activeLeague];
+  const cached = leagueCache[requestedLeague];
   const CACHE_MS = 4 * 60 * 1000; // use cache if fresher than 4 min
   let newsResults, txResult, nocapResult;
 
   if (cached && cached.ts && (Date.now() - cached.ts) < CACHE_MS) {
-    // Use background-refreshed data
     newsResults = cached.newsResults;
     txResult = cached.txResult;
     nocapResult = cached.nocapResult;
   } else {
-    // Fetch fresh
     const fetches = [
-      Promise.allSettled(league.queries.map(q=>fetch(`/api/news?q=${encodeURIComponent(q)}&pageSize=20`).then(r=>r.json())))
+      Promise.allSettled(
+        league.queries.map(q =>
+          fetch(`/api/news?q=${encodeURIComponent(q)}&pageSize=20`).then(r => r.json())
+        )
+      )
     ];
-    if (league.hasTransactions) fetches.push(fetch(TX_ENDPOINTS[activeLeague]).then(r=>r.json()).catch(()=>null));
-    if (league.hasSocial) fetches.push(fetch('/api/nocap').then(r=>r.json()).catch(()=>null));
+
+    if (league.hasTransactions) {
+      fetches.push(
+        fetch(TX_ENDPOINTS[requestedLeague]).then(r => r.json()).catch(() => null)
+      );
+    }
+    if (league.hasSocial) {
+      fetches.push(fetch('/api/nocap').then(r => r.json()).catch(() => null));
+    }
+
     const results = await Promise.allSettled(fetches);
+
+    if (requestId !== fetchRequestId || requestedLeague !== activeLeague) return;
+
     newsResults = results[0];
     txResult = league.hasTransactions ? results[1] : null;
-    nocapResult = league.hasSocial ? results[league.hasTransactions ? 2 : 1] : null;
-    leagueCache[activeLeague] = { newsResults, txResult, nocapResult, ts: Date.now() };
+    nocapResult = league.hasSocial
+      ? results[league.hasTransactions ? 2 : 1]
+      : null;
+
+    leagueCache[requestedLeague] = {
+      newsResults,
+      txResult,
+      nocapResult,
+      ts: Date.now()
+    };
   }
 
-  // Process news
-  const seen = new Set(); newsArticles = [];
+  if (requestId !== fetchRequestId || requestedLeague !== activeLeague) return;
+
+  const seen = new Set();
+  newsArticles = [];
+
   if (newsResults.status === 'fulfilled') {
-    for (const r of newsResults.value) {
-      if (r.status==='fulfilled' && r.value.articles) {
-        for (const a of r.value.articles) {
-          if (!seen.has(a.url) && a.title && a.title!=='[Removed]') {
-            seen.add(a.url);
-            a._type='news'; a._teams=matchTeams(a);
-            a._trade=isTrade(a); a._injury=isInjury(a); a._breaking=isBreaking(a);
-            a._sortDate=new Date(a.publishedAt);
-            newsArticles.push(a);
-          }
-        }
+    for (const result of newsResults.value) {
+      if (result.status !== 'fulfilled' || !result.value.articles) continue;
+
+      for (const article of result.value.articles) {
+        if (seen.has(article.url) || !article.title || article.title === '[Removed]') continue;
+
+        seen.add(article.url);
+        article._type = 'news';
+        article._teams = matchTeams(article);
+        article._trade = isTrade(article);
+        article._injury = isInjury(article);
+        article._breaking = isBreaking(article);
+        article._sortDate = new Date(article.publishedAt);
+        newsArticles.push(article);
       }
     }
   }
 
-  // Process social posts — filter to current league
   socialPosts = [];
-  if (nocapResult?.status==='fulfilled' && nocapResult.value?.items) {
-    for (const p of nocapResult.value.items) {
-      // Filter to posts matching the active league
-      const leagues = [...(p.matched_leagues||[]), ...(p.matched_streams||[])].map(s=>String(s).toUpperCase());
-      const teamMatches = matchTeams(p);
-      if (!leagues.includes(activeLeague.toUpperCase()) && !teamMatches.length) continue;
-      p._type='social'; p._teams=teamMatches;
-      p._trade=isTrade(p); p._injury=isInjury(p); p._breaking=isBreaking(p);
-      p._sortDate=new Date(p.created_at);
-      socialPosts.push(p);
+  if (nocapResult?.status === 'fulfilled' && nocapResult.value?.items) {
+    for (const post of nocapResult.value.items) {
+      const leagues = [
+        ...(post.matched_leagues || []),
+        ...(post.matched_streams || [])
+      ].map(value => String(value).toUpperCase());
+
+      const teamMatches = matchTeams(post);
+      if (!leagues.includes(requestedLeague.toUpperCase()) && !teamMatches.length) continue;
+
+      post._type = 'social';
+      post._teams = teamMatches;
+      post._trade = isTrade(post);
+      post._injury = isInjury(post);
+      post._breaking = isBreaking(post);
+      post._sortDate = new Date(post.created_at);
+      socialPosts.push(post);
     }
   }
 
-  // Process transactions (MLB + NHL)
   transactions = [];
-  if (txResult?.status==='fulfilled' && txResult.value?.transactions) {
-    for (const t of txResult.value.transactions) {
-      t._type='transaction'; t._teams=matchTeamsTransaction(t);
-      t._sortDate=new Date(t.date); t._trade=t._category==='trade'; t._injury=t._category==='injury'; t._breaking=false;
-      transactions.push(t);
+  if (txResult?.status === 'fulfilled' && txResult.value?.transactions) {
+    for (const transaction of txResult.value.transactions) {
+      transaction._type = 'transaction';
+      transaction._teams = matchTeamsTransaction(transaction);
+      transaction._sortDate = new Date(transaction.date);
+      transaction._trade = transaction._category === 'trade';
+      transaction._injury = transaction._category === 'injury';
+      transaction._breaking = false;
+      transactions.push(transaction);
     }
   }
 
-  updateStats(); updateTicker(); updateTabCounts(); renderSidebar(); renderCards();
-  btn.classList.remove('spinning');
-  document.getElementById('stat-updated').textContent = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
-}
+  updateStats();
+  updateTicker();
+  updateTabCounts();
+  renderSidebar();
+  renderCards();
 
+  btn.classList.remove('spinning');
+  document.getElementById('stat-updated').textContent =
+    new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
 function allItems() {
   if (activeSourceTab==='news') return newsArticles;
   if (activeSourceTab==='social') return socialPosts;
@@ -456,7 +500,6 @@ function renderNewsCard(a, delay) {
       <span class="card-author">${author}</span>
       <div style="display:flex;gap:6px">
         <button class="btn-read" data-url="${escapeHTML(articleUrl)}" onclick="openExternal(this)" ${articleUrl?'':'disabled'}>Read →</button>
-        <button class="btn-assign" title="This state is local to the current browser session" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
       </div>
     </div>
   </div>`;
@@ -502,7 +545,6 @@ function renderSocialCard(p, delay) {
       <div class="stream-tags">${streams.map(s=>`<span class="stream-tag">${escapeHTML(s)}</span>`).join('')}</div>
       <div style="display:flex;gap:6px">
         <button class="btn-read" data-url="${escapeHTML(postUrl)}" onclick="openExternal(this)" ${postUrl?'':'disabled'}>View post →</button>
-        <button class="btn-assign" title="This state is local to the current browser session" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
       </div>
     </div>
   </div>`;
@@ -531,7 +573,6 @@ function renderTransactionCard(t, delay) {
     </div>
     <div class="card-footer">
       <span style="color:#a78bfa;font-size:10px;font-family:'DM Mono',monospace">${leagueLabel} OFFICIAL</span>
-      <button class="btn-assign" title="This state is local to the current browser session" onclick="this.textContent='✓ Assigned';this.classList.add('assigned');this.disabled=true">Assign</button>
     </div>
   </div>`;
 }

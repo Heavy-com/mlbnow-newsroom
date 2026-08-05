@@ -4,7 +4,7 @@
   "description": "Heavy on MLB live newsroom dashboard",
   "scripts": {
     "start": "node api/news.js",
-    "test": "node test/signal.test.js && node test/alert-auth.test.js && node test/alert-engine.test.js && node test/alert-engine-expanded.test.js && node test/frontend-structure.test.js && node test/responsive-layout.test.js",
+    "test": "node test/signal.test.js && node test/alert-auth.test.js && node test/alert-engine.test.js && node test/alert-engine-expanded.test.js && node test/frontend-structure.test.js && node test/responsive-layout.test.js && node test/dashboard-correctness.test.js",
     "check": "for f in api/*.js lib/*.js test/*.js public/*.js; do node --check \"$f\"; done"
   },
   "engines": {
