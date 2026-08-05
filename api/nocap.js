@@ -1,27 +1,20 @@
-// Stable Signalizacija proxy with short caching and legacy-session fallback.
+'use strict';
 
-const { fetchSignalPosts, getSignalCredentials } = require('../lib/signal');
+const { fetchSignalPosts } = require('../lib/signal');
+const {
+  getFreshCache,
+  normalizeSignalRequest,
+  setBoundedCache,
+} = require('../lib/proxy-policy');
 
 const CACHE_DURATION_MS = 45 * 1000;
+const MAX_SIGNAL_CACHE_ENTRIES = 8;
 const cache = new Map();
 
 function setEdgeCache(res) {
   res.setHeader(
     'Vercel-CDN-Cache-Control',
     'public, max-age=30, stale-while-revalidate=60'
-  );
-}
-
-function getOptions(req) {
-  const url = new URL(req.url, 'https://heavy-newsroom.local');
-  const allowed = [
-    'limit', 'metrics', 'source', 'category', 'author', 'search',
-    'created_after', 'created_before', 'collected_after', 'metric_limit', 'cursor',
-  ];
-  return Object.fromEntries(
-    allowed
-      .map((key) => [key, url.searchParams.get(key)])
-      .filter(([, value]) => value !== null && value !== '')
   );
 }
 
@@ -32,36 +25,66 @@ module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-  const options = getOptions(req);
-  const cacheKey = JSON.stringify(options);
+  const url = new URL(req.url, 'https://heavy-newsroom.local');
+  const request = normalizeSignalRequest(url.searchParams);
+  if (!request.ok) {
+    return res.status(request.status).json({
+      error: request.error,
+      code: request.code,
+    });
+  }
+
+  const cacheKey = JSON.stringify(request.options);
   const now = Date.now();
-  const cached = cache.get(cacheKey);
+  const cached = getFreshCache(cache, cacheKey, CACHE_DURATION_MS, now);
 
-  if (cached && now - cached.timestamp < CACHE_DURATION_MS) {
+  if (cached) {
     setEdgeCache(res);
     res.setHeader('X-Cache', 'HIT');
-    res.setHeader('X-Cache-Age', `${Math.floor((now - cached.timestamp) / 1000)}s`);
+    res.setHeader(
+      'X-Cache-Age',
+      `${Math.floor((now - cached.timestamp) / 1000)}s`
+    );
     return res.status(200).json(cached.data);
   }
 
   try {
-    const { status, body } = await fetchSignalPosts(options);
-    if (status === 200) {
-      cache.set(cacheKey, { timestamp: now, data: body });
-      setEdgeCache(res);
+    const { status, body } = await fetchSignalPosts(request.options);
+    if (status !== 200 || !Array.isArray(body.items)) {
+      res.setHeader('X-Cache', 'MISS');
+      return res.status(status === 429 ? 503 : 502).json({
+        error: 'Signal source request failed',
+        source: 'signal',
+        upstream_status: status || null,
+        retryable: status === 429 || status >= 500,
+      });
     }
 
+    setBoundedCache(
+      cache,
+      cacheKey,
+      { timestamp: now, data: body },
+      MAX_SIGNAL_CACHE_ENTRIES
+    );
+
+    setEdgeCache(res);
     res.setHeader('X-Cache', 'MISS');
-    return res.status(status).json(body);
+    return res.status(200).json(body);
   } catch (error) {
-    const credentials = getSignalCredentials();
-    const status = error.code === 'SIGNAL_CREDENTIAL_MISSING' ? 503 : 500;
-    return res.status(status).json({
-      error: error.message,
-      credential_mode: credentials.mode,
-      expected_env: ['SIGNAL_API_TOKEN', 'SIGNALIZACIJA_API_TOKEN', 'NOCAP_SESSION'],
+    const missingCredential = error.code === 'SIGNAL_CREDENTIAL_MISSING';
+    return res.status(missingCredential ? 503 : 502).json({
+      error: missingCredential
+        ? 'Signal integration is not configured'
+        : 'Signal source request failed',
+      source: 'signal',
+      retryable: !missingCredential,
+      code: missingCredential
+        ? 'SIGNAL_INTEGRATION_UNAVAILABLE'
+        : 'SIGNAL_UPSTREAM_FAILURE',
     });
   }
 };

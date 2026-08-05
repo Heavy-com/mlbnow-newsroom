@@ -77,18 +77,16 @@ Copy `.env.example` into Vercel and populate the values that apply.
 | `/api/nba-alerts` | NBA Google Chat alerts |
 | `/api/nhl-alerts` | NHL Google Chat alerts |
 
-The Signal proxy accepts these query parameters:
+The public feed proxies are intentionally restricted:
 
-```text
-limit, metrics, source, category, author, search,
-created_after, created_before, collected_after,
-metric_limit, cursor
-```
+- `/api/news` accepts only the dashboard and alert-engine queries defined in the repository. `pageSize` is capped at 20 and `sortBy` is fixed to `publishedAt`.
+- `/api/nocap` accepts only `limit` and `metrics=latest`. `limit` is capped at 200.
+- Unsupported filters return HTTP 400 instead of being forwarded with Heavy's upstream credentials.
 
 Example:
 
 ```text
-/api/nocap?source=x&category=breaking_news&limit=50
+/api/nocap?limit=50&metrics=latest
 ```
 
 ## Deployment checklist
@@ -98,7 +96,7 @@ Example:
 3. Set `NEWS_API_KEY` and, if alerts are used, `GNEWS_API_KEY` plus the Google Chat webhooks.
 4. Set `ALERTS_SECRET` or `CRON_SECRET` before exposing or scheduling alert routes.
 5. Redeploy the project.
-6. Open `/api/health` and confirm `signal` and `news_api` are true.
+6. Open `/api/health` and confirm its status is `healthy` and all component checks are true.
 7. Open `/api/nocap?limit=5` and confirm normalized `items` are returned.
 8. Add the same `ALERTS_SECRET` as a GitHub Actions secret for manual workflow tests.
 9. Test alert routes with `Authorization: Bearer <ALERTS_SECRET>`. Do not restore the schedule until durable deduplication is implemented.
@@ -112,7 +110,6 @@ npm run check
 
 ## Important current limitations
 
-- `Assign` is still browser-only UI state. It is not shared among editors and disappears on refresh.
 - Alert deduplication currently uses in-memory sets, which are not durable across serverless cold starts or deployments. The automatic GitHub Actions schedule is disabled for this reason.
 - The repository does not include a database, authentication, shared editorial state, or assignment history.
 - The dashboard fetches and classifies posts in the browser; it does not yet maintain a persistent tip queue.
