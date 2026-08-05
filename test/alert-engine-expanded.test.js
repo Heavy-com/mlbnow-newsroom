@@ -9,6 +9,7 @@ const {
   getAlertConfig,
 } = require('../lib/alert-config');
 const {
+  createAlertHandler,
   runAlertCycle,
 } = require('../lib/alert-engine');
 
@@ -196,9 +197,10 @@ async function testFreshnessLeagueFilteringAndDeduplication() {
   assert.equal(sent.length, 3);
 }
 
-async function testWebhookFailureIsReported() {
+async function testWebhookFailureIsReportedAndRetried() {
   const config = getAlertConfig('nfl');
   const state = emptyState();
+  const sent = [];
 
   const article = freshArticle({
     title: 'NFL confirms roster update',
@@ -206,7 +208,7 @@ async function testWebhookFailureIsReported() {
     url: 'https://example.com/nfl-webhook-failure',
   });
 
-  const result = await runAlertCycle(config, {
+  const deps = {
     now: () => NOW,
     webhookUrl: 'https://chat.googleapis.com/mock',
     state,
@@ -221,11 +223,188 @@ async function testWebhookFailureIsReported() {
     postToGoogleChat: async () => {
       throw new Error('Mock Google Chat failure');
     },
+  };
+
+  const failed = await runAlertCycle(config, deps);
+
+  assert.equal(failed.success, false);
+  assert.equal(failed.alerts_sent, 0);
+  assert.equal(failed.errors.length, 1);
+  assert.match(String(failed.errors[0]), /Mock Google Chat failure/);
+  assert.equal(state.articleIds.size, 0);
+
+  deps.postToGoogleChat = async (_url, text) => {
+    sent.push(text);
+    return { status: 200, body: '' };
+  };
+
+  const retried = await runAlertCycle(config, deps);
+  assert.equal(retried.success, true);
+  assert.equal(retried.alerts_sent, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(state.articleIds.size, 1);
+
+  const deduped = await runAlertCycle(config, deps);
+  assert.equal(deduped.alerts_sent, 0);
+  assert.equal(sent.length, 1);
+}
+
+async function testNon2xxWebhookResponseIsFailure() {
+  const config = getAlertConfig('nfl');
+  const state = emptyState();
+
+  const article = freshArticle({
+    title: 'NFL roster update',
+    description: 'The league published a roster update.',
+    url: 'https://example.com/nfl-rate-limit',
   });
 
+  const result = await runAlertCycle(config, {
+    now: () => NOW,
+    webhookUrl: 'https://chat.googleapis.com/mock',
+    state,
+    requestJSON: async () => ({
+      status: 200,
+      body: { articles: [article] },
+    }),
+    fetchSignalPosts: async () => ({
+      status: 200,
+      body: { items: [] },
+    }),
+    postToGoogleChat: async () => ({
+      status: 429,
+      body: 'rate limited',
+    }),
+  });
+
+  assert.equal(result.success, false);
   assert.equal(result.alerts_sent, 0);
   assert.equal(result.errors.length, 1);
-  assert.match(String(result.errors[0]), /Mock Google Chat failure/);
+  assert.match(String(result.errors[0]), /HTTP 429/);
+  assert.match(String(result.errors[0]), /rate limited/);
+  assert.equal(state.articleIds.size, 0);
+}
+
+async function testTeamDeliveryRetriesOnlyFailedDestination() {
+  const config = getAlertConfig('mlb');
+  const state = emptyState();
+  const attempts = [];
+  let failDodgers = true;
+
+  const article = freshArticle({
+    title: 'Yankees and Dodgers roster update',
+    description: 'The New York Yankees and Los Angeles Dodgers made roster moves.',
+    url: 'https://example.com/yankees-dodgers-partial',
+    publishedAt: '2026-08-04T19:50:00Z',
+  });
+
+  const deps = {
+    now: () => NOW,
+    webhookUrl: 'https://chat.googleapis.com/mock',
+    state,
+    baseUrl: () => 'https://heavy-newsroom.vercel.app',
+    requestJSON: async (hostname) => {
+      if (hostname === 'statsapi.mlb.com') {
+        return { status: 200, body: { transactions: [] } };
+      }
+      return { status: 200, body: { articles: [article] } };
+    },
+    fetchSignalPosts: async () => ({
+      status: 200,
+      body: { items: [] },
+    }),
+    postToGoogleChat: async (_url, text) => {
+      const firstLine = text.split('\n')[0];
+      const team = firstLine.includes('Los Angeles Dodgers') ? 'dodgers' : 'yankees';
+      attempts.push(team);
+      if (team === 'dodgers' && failDodgers) {
+        return { status: 500, body: 'temporary failure' };
+      }
+      return { status: 200, body: '' };
+    },
+  };
+
+  const first = await runAlertCycle(config, deps);
+  assert.equal(first.success, false);
+  assert.equal(first.alerts_sent, 1);
+  assert.equal(first.errors.length, 1);
+  assert.deepEqual(attempts.sort(), ['dodgers', 'yankees']);
+  assert.equal(state.articleIds.size, 1);
+
+  attempts.length = 0;
+  failDodgers = false;
+
+  const second = await runAlertCycle(config, deps);
+  assert.equal(second.success, true);
+  assert.equal(second.alerts_sent, 1);
+  assert.deepEqual(attempts, ['dodgers']);
+  assert.equal(state.articleIds.size, 2);
+
+  attempts.length = 0;
+  const third = await runAlertCycle(config, deps);
+  assert.equal(third.alerts_sent, 0);
+  assert.deepEqual(attempts, []);
+}
+
+async function testHandlerReturnsBadGatewayForDeliveryFailure() {
+  const config = getAlertConfig('nfl');
+  const original = process.env.ALERTS_SECRET;
+  process.env.ALERTS_SECRET = 'test-secret';
+
+  const article = freshArticle({
+    title: 'NFL roster update',
+    url: 'https://example.com/handler-failure',
+  });
+
+  const handler = createAlertHandler(config, {
+    now: () => NOW,
+    webhookUrl: 'https://chat.googleapis.com/mock',
+    state: emptyState(),
+    requestJSON: async () => ({
+      status: 200,
+      body: { articles: [article] },
+    }),
+    fetchSignalPosts: async () => ({
+      status: 200,
+      body: { items: [] },
+    }),
+    postToGoogleChat: async () => ({
+      status: 503,
+      body: 'chat unavailable',
+    }),
+  });
+
+  const req = {
+    method: 'GET',
+    headers: { authorization: 'Bearer test-secret' },
+  };
+  const res = {
+    statusCode: null,
+    payload: null,
+    setHeader() {},
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return this;
+    },
+  };
+
+  try {
+    await handler(req, res);
+  } finally {
+    if (original === undefined) {
+      delete process.env.ALERTS_SECRET;
+    } else {
+      process.env.ALERTS_SECRET = original;
+    }
+  }
+
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.payload.success, false);
+  assert.equal(res.payload.errors.length, 1);
 }
 
 async function testMlbTeamScopingAndTransactionDates() {
@@ -362,7 +541,10 @@ Promise.resolve()
   .then(testLeagueConfigurationCoverage)
   .then(testAllAlertRoutesLoad)
   .then(testFreshnessLeagueFilteringAndDeduplication)
-  .then(testWebhookFailureIsReported)
+  .then(testWebhookFailureIsReportedAndRetried)
+  .then(testNon2xxWebhookResponseIsFailure)
+  .then(testTeamDeliveryRetriesOnlyFailedDestination)
+  .then(testHandlerReturnsBadGatewayForDeliveryFailure)
   .then(testMlbTeamScopingAndTransactionDates)
   .then(testMissingWebhookFailsBeforeFetching)
   .then(() => console.log('expanded alert tests passed'))
