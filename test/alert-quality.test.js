@@ -11,7 +11,10 @@ const {
 } = require('../lib/alert-engine');
 const { getAlertConfig } = require('../lib/alert-config');
 
-const mlb = getAlertConfig('mlb');
+// Production disables news fetching; tests keep it on to cover that path.
+const getAlertConfigWithNews = (id) => ({ ...getAlertConfig(id), includeNews: true });
+
+const mlb = getAlertConfigWithNews('mlb');
 const NOW = new Date('2026-08-04T20:00:00Z').getTime();
 
 function post(text, overrides = {}) {

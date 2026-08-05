@@ -1,16 +1,18 @@
 name: Sports Google Chat Alerts
 
-# Automatic scheduling is intentionally disabled until alert deduplication is
-# persisted outside server memory. Run manually for controlled testing.
 on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+
 jobs:
   send-alerts:
     runs-on: ubuntu-latest
     steps:
+      # continue-on-error so a degraded response from one league never
+      # prevents the remaining leagues from running.
       - name: MLB Alerts
+        continue-on-error: true
         run: |
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${{ secrets.ALERTS_SECRET }}" \
@@ -18,6 +20,7 @@ jobs:
           echo ""
 
       - name: NFL Alerts
+        continue-on-error: true
         run: |
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${{ secrets.ALERTS_SECRET }}" \
@@ -25,6 +28,7 @@ jobs:
           echo ""
 
       - name: NBA Alerts
+        continue-on-error: true
         run: |
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${{ secrets.ALERTS_SECRET }}" \
@@ -32,6 +36,7 @@ jobs:
           echo ""
 
       - name: NHL Alerts
+        continue-on-error: true
         run: |
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${{ secrets.ALERTS_SECRET }}" \

@@ -9,6 +9,9 @@ process.env.GNEWS_API_KEY = 'test-key';
 const { buildDashboardFeed } = require('../lib/dashboard-feed');
 const { createSourceError } = require('../lib/source-error');
 const { getAlertConfig } = require('../lib/alert-config');
+
+// Production disables news fetching; tests keep it on to cover that path.
+const getAlertConfigWithNews = (id) => ({ ...getAlertConfig(id), includeNews: true });
 const {
   createAlertHandler,
   runAlertCycle,
@@ -98,7 +101,7 @@ async function testCombinedFeedReportsTotalFailure() {
 }
 
 async function testAlertCycleReportsPartialSourceFailure() {
-  const config = getAlertConfig('nfl');
+  const config = getAlertConfigWithNews('nfl');
   let newsCalls = 0;
   const sent = [];
 
@@ -151,7 +154,7 @@ async function testAlertHandlerReturnsBadGatewayForSourceFailure() {
   const originalSecret = process.env.ALERTS_SECRET;
   process.env.ALERTS_SECRET = 'test-secret';
 
-  const handler = createAlertHandler(getAlertConfig('nfl'), {
+  const handler = createAlertHandler(getAlertConfigWithNews('nfl'), {
     now: () => NOW,
     webhookUrl: 'https://chat.googleapis.com/mock',
     state: emptyState(),

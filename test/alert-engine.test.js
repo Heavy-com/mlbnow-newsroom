@@ -9,21 +9,24 @@ const {
 } = require('../lib/alert-engine');
 const { getAlertConfig } = require('../lib/alert-config');
 
+// Production disables news fetching; tests keep it on to cover that path.
+const getAlertConfigWithNews = (id) => ({ ...getAlertConfig(id), includeNews: true });
+
 for (const league of ['mlb', 'nfl', 'nba', 'nhl']) {
-  const config = getAlertConfig(league);
+  const config = getAlertConfigWithNews(league);
   assert.equal(config.id, league);
   assert.ok(config.queries.length > 0);
   assert.ok(Object.keys(config.teams).length > 0);
 }
 
-const nfl = getAlertConfig('nfl');
+const nfl = getAlertConfigWithNews('nfl');
 assert.deepEqual(
   classifyTypes({ title: 'Chiefs confirmed major injury update' }, nfl),
   ['breaking', 'injury']
 );
 assert.deepEqual(matchTeams({ title: 'Patrick Mahomes and the Kansas City Chiefs' }, nfl), ['chiefs']);
 
-const mlb = getAlertConfig('mlb');
+const mlb = getAlertConfigWithNews('mlb');
 assert.deepEqual(
   matchTeams({ title: 'Roster update', matched_streams: ['Yankees'] }, mlb),
   ['yankees']

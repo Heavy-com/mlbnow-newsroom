@@ -8,6 +8,9 @@ const {
   CONFIGS,
   getAlertConfig,
 } = require('../lib/alert-config');
+
+// Production disables news fetching; tests keep it on to cover that path.
+const getAlertConfigWithNews = (id) => ({ ...getAlertConfig(id), includeNews: true });
 const {
   createAlertHandler,
   runAlertCycle,
@@ -68,7 +71,7 @@ function testLeagueConfigurationCoverage() {
   assert.deepEqual(Object.keys(CONFIGS).sort(), Object.keys(expected).sort());
 
   for (const [league, details] of Object.entries(expected)) {
-    const config = getAlertConfig(league);
+    const config = getAlertConfigWithNews(league);
     const teamIds = Object.keys(config.teams);
 
     assert.equal(config.id, league);
@@ -88,7 +91,7 @@ function testLeagueConfigurationCoverage() {
     }
   }
 
-  assert.throws(() => getAlertConfig('wnba'), /Unknown alert config/);
+  assert.throws(() => getAlertConfigWithNews('wnba'), /Unknown alert config/);
 }
 
 function testAllAlertRoutesLoad() {
@@ -105,7 +108,7 @@ function testAllAlertRoutesLoad() {
 }
 
 async function testFreshnessLeagueFilteringAndDeduplication() {
-  const config = getAlertConfig('nba');
+  const config = getAlertConfigWithNews('nba');
   const state = emptyState();
   const sent = [];
 
@@ -198,7 +201,7 @@ async function testFreshnessLeagueFilteringAndDeduplication() {
 }
 
 async function testWebhookFailureIsReportedAndRetried() {
-  const config = getAlertConfig('nfl');
+  const config = getAlertConfigWithNews('nfl');
   const state = emptyState();
   const sent = [];
 
@@ -250,7 +253,7 @@ async function testWebhookFailureIsReportedAndRetried() {
 }
 
 async function testNon2xxWebhookResponseIsFailure() {
-  const config = getAlertConfig('nfl');
+  const config = getAlertConfigWithNews('nfl');
   const state = emptyState();
 
   const article = freshArticle({
@@ -286,7 +289,7 @@ async function testNon2xxWebhookResponseIsFailure() {
 }
 
 async function testTeamDeliveryRetriesOnlyFailedDestination() {
-  const config = getAlertConfig('mlb');
+  const config = getAlertConfigWithNews('mlb');
   const state = emptyState();
   const attempts = [];
   let failDodgers = true;
@@ -347,7 +350,7 @@ async function testTeamDeliveryRetriesOnlyFailedDestination() {
 }
 
 async function testHandlerReturnsBadGatewayForDeliveryFailure() {
-  const config = getAlertConfig('nfl');
+  const config = getAlertConfigWithNews('nfl');
   const original = process.env.ALERTS_SECRET;
   process.env.ALERTS_SECRET = 'test-secret';
 
@@ -408,7 +411,7 @@ async function testHandlerReturnsBadGatewayForDeliveryFailure() {
 }
 
 async function testMlbTeamScopingAndTransactionDates() {
-  const config = getAlertConfig('mlb');
+  const config = getAlertConfigWithNews('mlb');
   const state = emptyState();
   const sent = [];
 
@@ -505,7 +508,7 @@ async function testMlbTeamScopingAndTransactionDates() {
 }
 
 async function testMissingWebhookFailsBeforeFetching() {
-  const config = getAlertConfig('nhl');
+  const config = getAlertConfigWithNews('nhl');
   const original = process.env[config.webhookEnv];
   delete process.env[config.webhookEnv];
 
