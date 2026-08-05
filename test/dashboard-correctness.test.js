@@ -27,7 +27,8 @@ assert.match(app, /let fetchRequestId = 0;/u);
 assert.match(app, /const requestId = \+\+fetchRequestId;/u);
 assert.match(app, /const requestedLeague = activeLeague;/u);
 assert.match(app, /leagueCache\[requestedLeague\]/u);
-assert.match(app, /TX_ENDPOINTS\[requestedLeague\]/u);
+assert.match(app, /\/api\/feed\?league=/u);
+assert.doesNotMatch(app, /TX_ENDPOINTS/u);
 assert.match(app, /requestId !== fetchRequestId \|\| requestedLeague !== activeLeague/u);
 
 assert.doesNotMatch(app, /class="btn-assign"/u);

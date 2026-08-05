@@ -4,8 +4,10 @@
   "description": "Heavy on MLB live newsroom dashboard",
   "scripts": {
     "start": "node api/news.js",
-    "test": "node test/signal.test.js && node test/alert-auth.test.js && node test/alert-engine.test.js && node test/alert-engine-expanded.test.js && node test/frontend-structure.test.js && node test/responsive-layout.test.js && node test/dashboard-correctness.test.js && node test/proxy-hardening.test.js",
-    "check": "for f in api/*.js lib/*.js test/*.js public/*.js; do node --check \"$f\"; done"
+    "test": "node test/signal.test.js && node test/alert-auth.test.js && node test/alert-engine.test.js && node test/alert-engine-expanded.test.js && node test/frontend-structure.test.js && node test/responsive-layout.test.js && node test/dashboard-correctness.test.js && node test/proxy-hardening.test.js && node test/final-foundation.test.js",
+    "check": "for f in api/*.js lib/*.js test/*.js public/*.js; do node --check \"$f\"; done",
+    "audit:pre-db": "npm run check && npm test && node scripts/pre-database-audit.js",
+    "verify:production": "bash scripts/verify-production.sh"
   },
   "engines": {
     "node": ">=18.0.0"
