@@ -25,29 +25,44 @@ module.exports = async (req, res) => {
     'GCHAT_NHL',
   ].every((name) => Boolean(process.env[name]));
 
+  // This endpoint intentionally checks configuration only. Live dependency
+  // status is reported by /api/feed and scripts/verify-production.sh so a
+  // public health request does not consume upstream quotas or hammer vendors.
   const components = {
-    dashboard_feeds: signalConfigured && newsConfigured,
-    alert_sources: signalConfigured && newsConfigured && gnewsConfigured,
+    dashboard_feeds: signalConfigured,
+    alert_sources: signalConfigured,
     alert_delivery: alertAuthConfigured && allChatWebhooksConfigured,
+    optional_newsapi: newsConfigured,
+    optional_gnews: gnewsConfigured,
   };
 
-  const warnings = [];
-  if (!components.dashboard_feeds) {
-    warnings.push('One or more dashboard feed integrations are unavailable.');
+  const warnings = [
+    'Configuration-only check. Live source status is reported by the league feed endpoints and production verification.',
+  ];
+
+  if (!signalConfigured) {
+    warnings.push('Signal is not configured; dashboard social feeds and Signal alerts are unavailable.');
   }
-  if (!components.alert_sources) {
-    warnings.push('One or more alert source integrations are unavailable.');
+  if (!newsConfigured) {
+    warnings.push('NewsAPI is not configured; optional web-news results are unavailable.');
   }
-  if (!components.alert_delivery) {
-    warnings.push('Alert authentication or delivery configuration is incomplete.');
+  if (!gnewsConfigured) {
+    warnings.push('GNews is not configured; optional web-news alert results are unavailable.');
+  }
+  if (!alertAuthConfigured || !allChatWebhooksConfigured) {
+    warnings.push('Alert authentication or Google Chat delivery configuration is incomplete.');
   }
 
-  const ok = Object.values(components).every(Boolean);
+  const ok = components.dashboard_feeds
+    && components.alert_sources
+    && components.alert_delivery;
 
   return res.status(200).json({
     ok,
-    status: ok ? 'healthy' : 'degraded',
-    version: '2.1.0-proxy-hardening',
+    status: ok ? 'configured' : 'degraded',
+    check_scope: 'configuration_only',
+    live_dependencies_checked: false,
+    version: '2.2.0-signal-filtering',
     components,
     warnings,
     time: new Date().toISOString(),

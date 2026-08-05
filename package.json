@@ -1,10 +1,10 @@
 {
   "name": "heavy-on-mlb-newsroom",
-  "version": "2.0.0",
-  "description": "Heavy on MLB live newsroom dashboard",
+  "version": "2.2.0",
+  "description": "Heavy sports live newsroom dashboard",
   "scripts": {
     "start": "node api/news.js",
-    "test": "node test/signal.test.js && node test/alert-auth.test.js && node test/alert-engine.test.js && node test/alert-engine-expanded.test.js && node test/frontend-structure.test.js && node test/responsive-layout.test.js && node test/dashboard-correctness.test.js && node test/proxy-hardening.test.js && node test/final-foundation.test.js",
+    "test": "node test/signal.test.js && node test/alert-auth.test.js && node test/alert-engine.test.js && node test/alert-engine-expanded.test.js && node test/frontend-structure.test.js && node test/responsive-layout.test.js && node test/dashboard-correctness.test.js && node test/proxy-hardening.test.js && node test/signal-league-filter.test.js && node test/health-semantics.test.js && node test/final-foundation.test.js",
     "check": "for f in api/*.js lib/*.js test/*.js public/*.js; do node --check \"$f\"; done",
     "audit:pre-db": "npm run check && npm test && node scripts/pre-database-audit.js",
     "verify:production": "bash scripts/verify-production.sh"
