@@ -1,6 +1,7 @@
 'use strict';
 
 const { getSignalCredentials } = require('../lib/signal');
+const { isTursoConfigured } = require('../lib/turso');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -28,10 +29,13 @@ module.exports = async (req, res) => {
   // This endpoint intentionally checks configuration only. Live dependency
   // status is reported by /api/feed and scripts/verify-production.sh so a
   // public health request does not consume upstream quotas or hammer vendors.
+  const tursoConfigured = isTursoConfigured();
+
   const components = {
     dashboard_feeds: signalConfigured,
     alert_sources: signalConfigured,
     alert_delivery: alertAuthConfigured && allChatWebhooksConfigured,
+    durable_alert_state: tursoConfigured,
     optional_newsapi: newsConfigured,
     optional_gnews: gnewsConfigured,
   };
@@ -53,6 +57,10 @@ module.exports = async (req, res) => {
     warnings.push('Alert authentication or Google Chat delivery configuration is incomplete.');
   }
 
+  if (!tursoConfigured) {
+    warnings.push('Turso is not configured; alert deduplication falls back to in-memory state and duplicates are possible after each deploy or cold start.');
+  }
+
   const ok = components.dashboard_feeds
     && components.alert_sources
     && components.alert_delivery;
@@ -62,7 +70,8 @@ module.exports = async (req, res) => {
     status: ok ? 'configured' : 'degraded',
     check_scope: 'configuration_only',
     live_dependencies_checked: false,
-    version: '2.2.0-signal-filtering',
+    version: '2.3.0-durable-alerts',
+    alert_store_mode: tursoConfigured ? 'turso' : 'memory',
     components,
     warnings,
     time: new Date().toISOString(),
