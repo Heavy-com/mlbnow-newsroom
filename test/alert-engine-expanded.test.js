@@ -59,7 +59,7 @@ function freshPost(overrides = {}) {
 
 function testLeagueConfigurationCoverage() {
   const expected = {
-    mlb: { teams: 4, webhook: 'GCHAT_MLB', provider: 'news-proxy' },
+    mlb: { teams: 30, webhook: 'GCHAT_MLB', provider: 'gnews' },
     nfl: { teams: 32, webhook: 'GCHAT_NFL', provider: 'gnews' },
     nba: { teams: 30, webhook: 'GCHAT_NBA', provider: 'gnews' },
     nhl: { teams: 32, webhook: 'GCHAT_NHL', provider: 'gnews' },
