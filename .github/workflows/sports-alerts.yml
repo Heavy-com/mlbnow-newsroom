@@ -3,8 +3,9 @@ name: Sports Google Chat Alerts
 # Automatic scheduling is intentionally disabled until alert deduplication is
 # persisted outside server memory. Run manually for controlled testing.
 on:
+  schedule:
+    - cron: '*/5 * * * *'
   workflow_dispatch:
-
 jobs:
   send-alerts:
     runs-on: ubuntu-latest
