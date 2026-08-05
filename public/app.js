@@ -263,89 +263,79 @@ async function setLeague(league, el) {
 async function fetchAll() {
   const requestId = ++fetchRequestId;
   const requestedLeague = activeLeague;
-  const league = LEAGUES[requestedLeague];
   const btn = document.getElementById('refreshBtn');
+  const updatedEl = document.getElementById('stat-updated');
+
   btn.classList.add('spinning');
-  document.getElementById('cardsGrid').innerHTML = '<div class="state-box"><div class="spinner"></div><span>Connecting to sources…</span></div>';
+  document.getElementById('cardsGrid').innerHTML =
+    '<div class="state-box"><div class="spinner"></div><span>Connecting to sources…</span></div>';
 
-  const cached = leagueCache[requestedLeague];
-  const CACHE_MS = 4 * 60 * 1000; // use cache if fresher than 4 min
-  let newsResults, txResult, nocapResult;
+  try {
+    const cached = leagueCache[requestedLeague];
+    const CACHE_MS = 4 * 60 * 1000;
+    let feed;
 
-  if (cached && cached.ts && (Date.now() - cached.ts) < CACHE_MS) {
-    newsResults = cached.newsResults;
-    txResult = cached.txResult;
-    nocapResult = cached.nocapResult;
-  } else {
-    const fetches = [
-      Promise.allSettled(
-        league.queries.map(q =>
-          fetch(`/api/news?q=${encodeURIComponent(q)}&pageSize=20`).then(r => r.json())
-        )
-      )
-    ];
-
-    if (league.hasTransactions) {
-      fetches.push(
-        fetch(TX_ENDPOINTS[requestedLeague]).then(r => r.json()).catch(() => null)
+    if (cached?.feed && cached.ts && (Date.now() - cached.ts) < CACHE_MS) {
+      feed = cached.feed;
+    } else {
+      const response = await fetch(
+        `/api/feed?league=${encodeURIComponent(requestedLeague)}`
       );
-    }
-    if (league.hasSocial) {
-      fetches.push(fetch('/api/nocap').then(r => r.json()).catch(() => null));
-    }
+      const body = await response.json().catch(() => ({}));
 
-    const results = await Promise.allSettled(fetches);
+      if (!response.ok) {
+        const message = body.error || `Feed request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      if (requestId !== fetchRequestId || requestedLeague !== activeLeague) return;
+
+      feed = body;
+      leagueCache[requestedLeague] = {
+        feed,
+        // Partial feeds should be retried on the next refresh rather than held for 4 minutes.
+        ts: feed.partial ? 0 : Date.now()
+      };
+    }
 
     if (requestId !== fetchRequestId || requestedLeague !== activeLeague) return;
 
-    newsResults = results[0];
-    txResult = league.hasTransactions ? results[1] : null;
-    nocapResult = league.hasSocial
-      ? results[league.hasTransactions ? 2 : 1]
-      : null;
+    const seen = new Set();
+    newsArticles = [];
 
-    leagueCache[requestedLeague] = {
-      newsResults,
-      txResult,
-      nocapResult,
-      ts: Date.now()
-    };
-  }
-
-  if (requestId !== fetchRequestId || requestedLeague !== activeLeague) return;
-
-  const seen = new Set();
-  newsArticles = [];
-
-  if (newsResults.status === 'fulfilled') {
-    for (const result of newsResults.value) {
-      if (result.status !== 'fulfilled' || !result.value.articles) continue;
-
-      for (const article of result.value.articles) {
-        if (seen.has(article.url) || !article.title || article.title === '[Removed]') continue;
-
-        seen.add(article.url);
-        article._type = 'news';
-        article._teams = matchTeams(article);
-        article._trade = isTrade(article);
-        article._injury = isInjury(article);
-        article._breaking = isBreaking(article);
-        article._sortDate = new Date(article.publishedAt);
-        newsArticles.push(article);
+    for (const article of Array.isArray(feed.news) ? feed.news : []) {
+      if (
+        seen.has(article.url)
+        || !article.title
+        || article.title === '[Removed]'
+      ) {
+        continue;
       }
-    }
-  }
 
-  socialPosts = [];
-  if (nocapResult?.status === 'fulfilled' && nocapResult.value?.items) {
-    for (const post of nocapResult.value.items) {
+      seen.add(article.url);
+      article._type = 'news';
+      article._teams = matchTeams(article);
+      article._trade = isTrade(article);
+      article._injury = isInjury(article);
+      article._breaking = isBreaking(article);
+      article._sortDate = new Date(article.publishedAt);
+      newsArticles.push(article);
+    }
+
+    socialPosts = [];
+    for (const post of Array.isArray(feed.social) ? feed.social : []) {
       const leagues = [
         ...(post.matched_leagues || []),
         ...(post.matched_streams || [])
       ].map(value => String(value).toUpperCase());
 
       const teamMatches = matchTeams(post);
-      if (!leagues.includes(requestedLeague.toUpperCase()) && !teamMatches.length) continue;
+      if (
+        !leagues.includes(requestedLeague.toUpperCase())
+        && !teamMatches.length
+      ) {
+        continue;
+      }
 
       post._type = 'social';
       post._teams = teamMatches;
@@ -355,11 +345,12 @@ async function fetchAll() {
       post._sortDate = new Date(post.created_at);
       socialPosts.push(post);
     }
-  }
 
-  transactions = [];
-  if (txResult?.status === 'fulfilled' && txResult.value?.transactions) {
-    for (const transaction of txResult.value.transactions) {
+    transactions = [];
+    for (
+      const transaction
+      of Array.isArray(feed.transactions) ? feed.transactions : []
+    ) {
       transaction._type = 'transaction';
       transaction._teams = matchTeamsTransaction(transaction);
       transaction._sortDate = new Date(transaction.date);
@@ -368,18 +359,47 @@ async function fetchAll() {
       transaction._breaking = false;
       transactions.push(transaction);
     }
+
+    updateStats();
+    updateTicker();
+    updateTabCounts();
+    renderSidebar();
+    renderCards();
+
+    const updated = new Date().toLocaleTimeString(
+      'en-US',
+      { hour: '2-digit', minute: '2-digit' }
+    );
+    const sourceErrors = Array.isArray(feed.source_errors)
+      ? feed.source_errors
+      : [];
+
+    updatedEl.textContent = sourceErrors.length
+      ? `Partial · ${updated}`
+      : updated;
+    updatedEl.title = sourceErrors.length
+      ? sourceErrors.map(error => `${error.source}: ${error.message}`).join('\n')
+      : 'All dashboard feed sources responded.';
+  } catch (error) {
+    if (requestId !== fetchRequestId || requestedLeague !== activeLeague) return;
+
+    newsArticles = [];
+    socialPosts = [];
+    transactions = [];
+    updateStats();
+    updateTabCounts();
+    renderSidebar();
+
+    document.getElementById('cardsGrid').innerHTML =
+      `<div class="state-box"><span>${escapeHTML(error.message || 'Feed unavailable.')}</span></div>`;
+    document.getElementById('resultCount').textContent = 'Feed unavailable';
+    updatedEl.textContent = 'Unavailable';
+    updatedEl.title = error.message || 'Dashboard feed unavailable.';
+  } finally {
+    if (requestId === fetchRequestId) btn.classList.remove('spinning');
   }
-
-  updateStats();
-  updateTicker();
-  updateTabCounts();
-  renderSidebar();
-  renderCards();
-
-  btn.classList.remove('spinning');
-  document.getElementById('stat-updated').textContent =
-    new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
+
 function allItems() {
   if (activeSourceTab==='news') return newsArticles;
   if (activeSourceTab==='social') return socialPosts;
@@ -580,7 +600,6 @@ function renderTransactionCard(t, delay) {
 function updateClock(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 setInterval(updateClock,1000); updateClock();
 // Refresh only the league currently being viewed.
-const TX_ENDPOINTS = { mlb:'/api/transactions', nhl:'/api/nhl-transactions', nba:'/api/nba-transactions', nfl:'/api/nfl-transactions' };
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
 
 function refreshActiveLeague() {

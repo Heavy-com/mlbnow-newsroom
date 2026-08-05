@@ -1,15 +1,8 @@
 'use strict';
 
-const { fetchSignalPosts } = require('../lib/signal');
-const {
-  getFreshCache,
-  normalizeSignalRequest,
-  setBoundedCache,
-} = require('../lib/proxy-policy');
-
-const CACHE_DURATION_MS = 45 * 1000;
-const MAX_SIGNAL_CACHE_ENTRIES = 8;
-const cache = new Map();
+const { normalizeSignalRequest } = require('../lib/proxy-policy');
+const { fetchSignalFeed } = require('../lib/signal-source');
+const { serializeSourceError } = require('../lib/source-error');
 
 function setEdgeCache(res) {
   res.setHeader(
@@ -38,53 +31,23 @@ module.exports = async (req, res) => {
     });
   }
 
-  const cacheKey = JSON.stringify(request.options);
-  const now = Date.now();
-  const cached = getFreshCache(cache, cacheKey, CACHE_DURATION_MS, now);
-
-  if (cached) {
-    setEdgeCache(res);
-    res.setHeader('X-Cache', 'HIT');
-    res.setHeader(
-      'X-Cache-Age',
-      `${Math.floor((now - cached.timestamp) / 1000)}s`
-    );
-    return res.status(200).json(cached.data);
-  }
-
   try {
-    const { status, body } = await fetchSignalPosts(request.options);
-    if (status !== 200 || !Array.isArray(body.items)) {
-      res.setHeader('X-Cache', 'MISS');
-      return res.status(status === 429 ? 503 : 502).json({
-        error: 'Signal source request failed',
-        source: 'signal',
-        upstream_status: status || null,
-        retryable: status === 429 || status >= 500,
-      });
-    }
-
-    setBoundedCache(
-      cache,
-      cacheKey,
-      { timestamp: now, data: body },
-      MAX_SIGNAL_CACHE_ENTRIES
-    );
-
+    const body = await fetchSignalFeed(request.options);
     setEdgeCache(res);
-    res.setHeader('X-Cache', 'MISS');
     return res.status(200).json(body);
   } catch (error) {
-    const missingCredential = error.code === 'SIGNAL_CREDENTIAL_MISSING';
-    return res.status(missingCredential ? 503 : 502).json({
-      error: missingCredential
-        ? 'Signal integration is not configured'
-        : 'Signal source request failed',
-      source: 'signal',
-      retryable: !missingCredential,
-      code: missingCredential
-        ? 'SIGNAL_INTEGRATION_UNAVAILABLE'
-        : 'SIGNAL_UPSTREAM_FAILURE',
+    const sourceError = serializeSourceError(error, 'signal');
+    const status = sourceError.code === 'SIGNAL_INTEGRATION_UNAVAILABLE'
+      ? 503
+      : sourceError.status === 429
+        ? 503
+        : 502;
+    return res.status(status).json({
+      error: sourceError.message,
+      source: sourceError.source,
+      code: sourceError.code,
+      status: sourceError.status,
+      retryable: sourceError.retryable,
     });
   }
 };

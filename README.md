@@ -69,13 +69,16 @@ Copy `.env.example` into Vercel and populate the values that apply.
 | --- | --- |
 | `/` | Newsroom dashboard |
 | `/api/health` | Safe environment/configuration status |
-| `/api/news` | NewsAPI proxy |
+| `/api/feed?league=mlb` | Combined dashboard feed for one league |
+| `/api/news` | Restricted NewsAPI proxy |
 | `/api/nocap` | Signalizacija proxy and compatibility adapter |
 | `/api/transactions` | Official MLB transactions |
 | `/api/alerts` | MLB Google Chat alerts |
 | `/api/nfl-alerts` | NFL Google Chat alerts |
 | `/api/nba-alerts` | NBA Google Chat alerts |
 | `/api/nhl-alerts` | NHL Google Chat alerts |
+
+The dashboard now uses one combined `/api/feed?league=<league>` request. It returns partial results when one source fails and includes `source_status` plus `source_errors` so failures are visible.
 
 The public feed proxies are intentionally restricted:
 
@@ -106,11 +109,18 @@ Example:
 ```bash
 npm test
 npm run check
+npm run audit:pre-db
+```
+
+After a production deployment, run:
+
+```bash
+npm run verify:production
 ```
 
 ## Important current limitations
 
-- Alert deduplication currently uses in-memory sets, which are not durable across serverless cold starts or deployments. The automatic GitHub Actions schedule is disabled for this reason.
+- Alert deduplication currently uses in-memory sets, which are not durable across serverless cold starts or deployments. The automatic GitHub Actions schedule is disabled until durable deduplication is implemented.
 - The repository does not include a database, authentication, shared editorial state, or assignment history.
 - The dashboard fetches and classifies posts in the browser; it does not yet maintain a persistent tip queue.
 - Signal league/team matching falls back to text matching when upstream category/entity fields are absent.
