@@ -78,7 +78,7 @@ async function testSignalUpsertChunks() {
     author: { username: 'reporter', display_name: 'Reporter' },
   }));
   assert.equal(await store.upsertSignals('nfl', posts, 'now'), 85);
-  assert.deepEqual(calls.batchSizes, [40, 40, 5]);
+  assert.deepEqual(calls.batchSizes, [15, 15, 15, 15, 15, 10]);
 }
 
 // ---------- engine-level ----------
