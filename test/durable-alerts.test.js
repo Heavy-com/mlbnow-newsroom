@@ -260,6 +260,63 @@ async function testMemoryModeStillWorksWithoutTurso() {
   assert.ok(state.postIds.has('p1'));
 }
 
+
+// ---------- clustering ----------
+
+async function testSameStoryFromManyAccountsSendsOnce() {
+  // Mimic the real primary-key behavior: a delivery key can only be claimed once.
+  const seen = new Set();
+  const { calls, store } = fakeStore({
+    claim: (key) => {
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    },
+  });
+  const sent = [];
+  const variants = [
+    'Injury update: Why did Phillies starter Andrew Painter exit his start early',
+    'Phillies starter Andrew Painter exited early with a strain in his hamstring',
+    'Andrew Painter has a hamstring strain, per Rob Thomson. Injury update to come',
+  ].map((text, index) => ({
+    ...post(`painter-${index}`),
+    text_preview: text,
+  }));
+
+  const result = await runAlertCycle(nfl, deps(store, sent, variants));
+
+  assert.equal(result.alerts_sent, 1, 'three accounts, one story, one alert');
+  assert.equal(calls.claim.length, 3);
+  const keys = calls.claim.map((c) => c.key);
+  assert.ok(keys.every((k) => k === keys[0]), 'all three share one delivery key');
+  assert.match(keys[0], /^story::andrew painter::/u);
+}
+
+async function testDistinctStoriesStillSendSeparately() {
+  const { store } = fakeStore();
+  const sent = [];
+  const posts = [
+    { ...post('a'), text_preview: 'Andrew Painter has a hamstring strain and is injured' },
+    { ...post('b'), text_preview: 'Gerrit Cole placed on the injured list with elbow soreness' },
+  ];
+
+  const result = await runAlertCycle(nfl, deps(store, sent, posts));
+  assert.equal(result.alerts_sent, 2);
+}
+
+async function testPostsWithoutANameKeepTheirOwnKey() {
+  const { calls, store } = fakeStore();
+  const sent = [];
+  const posts = [
+    { ...post('x1'), text_preview: 'Kansas City Chiefs announced a roster move today' },
+    { ...post('x2'), text_preview: 'Kansas City Chiefs announced another roster move today' },
+  ];
+
+  await runAlertCycle(nfl, deps(store, sent, posts));
+  const keys = calls.claim.map((c) => c.key);
+  assert.equal(new Set(keys).size, 2, 'no anchor means no clustering');
+}
+
 Promise.resolve()
   .then(testMemoryStoreKeepsLegacySemantics)
   .then(testTursoClaimIsTheDedupeGate)
@@ -271,6 +328,9 @@ Promise.resolve()
   .then(testDryRunWritesNothing)
   .then(testHandlerReadsDryRunFromQuery)
   .then(testMemoryModeStillWorksWithoutTurso)
+  .then(testSameStoryFromManyAccountsSendsOnce)
+  .then(testDistinctStoriesStillSendSeparately)
+  .then(testPostsWithoutANameKeepTheirOwnKey)
   .then(() => console.log('durable alert tests passed'))
   .catch((error) => {
     console.error(error);
