@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heavy on Sports — Alert Triage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <img src="/Heavy-Clear7.png" alt="Heavy" style="height:28px;width:auto;filter:invert(1);opacity:0.92">
+    <div class="live-badge"><div class="live-dot"></div>TRIAGE</div>
+  </div>
+  <div class="header-right">
+    <a class="triage-link" href="/">← Dashboard</a>
+    <div class="clock" id="clock"></div>
+    <button class="refresh-btn" id="refreshBtn" onclick="loadTriage()">Refresh</button>
+  </div>
+</header>
+
+<div class="league-tabs">
+  <button class="league-tab active" id="ttab-mlb" onclick="setTriageLeague('mlb',this)" style="--league-color:#3b82f6">⚾ MLB</button>
+  <button class="league-tab" id="ttab-nfl" onclick="setTriageLeague('nfl',this)" style="--league-color:#a855f7">🏈 NFL</button>
+  <button class="league-tab" id="ttab-nba" onclick="setTriageLeague('nba',this)" style="--league-color:#f97316">🏀 NBA</button>
+  <button class="league-tab" id="ttab-nhl" onclick="setTriageLeague('nhl',this)" style="--league-color:#22d3ee">🏒 NHL</button>
+</div>
+
+<main class="triage-main">
+  <p class="triage-intro">
+    Every Signal post stored for this league, with the alert decision replayed
+    against it. Use this to see what the filters are rejecting before changing
+    anything upstream.
+  </p>
+
+  <div class="triage-summary" id="triageSummary"></div>
+  <div class="triage-filters" id="triageFilters"></div>
+  <div class="triage-list" id="triageList">
+    <div class="triage-empty">Loading…</div>
+  </div>
+</main>
+
+<script src="/triage.js"></script>
+</body>
+</html>
